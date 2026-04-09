@@ -37,10 +37,12 @@ export interface PLTRecord {
   jabatanAsli: string;
   jabatanPlt: string;
   unitKerja: string;
+  unitKerjaTugas: string;
   noSk: string;
   tglMulai: string;
-  tglSelesai: string;
+  tglSelesai?: string;
   status: PLTStatus;
+  keterangan?: string;
 }
 
 export interface PLHRecord {
@@ -50,8 +52,31 @@ export interface PLHRecord {
   jabatanAsli: string;
   jabatanPlh: string;
   unitKerja: string;
+  unitKerjaTugas: string;
   noSk: string;
   tglMulai: string;
   tglSelesai: string;
   status: PLTStatus;
+  keterangan?: string;
+}
+
+export interface TeamMember {
+  nama: string;
+  jabatan: string;
+  status: string;
+}
+
+export interface WorkTeam {
+  id: string;
+  namaTim: string;
+  unitKerja: string;
+  ketua: TeamMember;
+  anggota: TeamMember[];
+  tahun: number;
+  status: 'Aktif' | 'Non-Aktif';
+  jenis: 'Tim Kerja' | 'Bagian';
+  parentId?: string;
+  createdAt?: any;
+  updatedAt?: any;
+  authorUid: string;
 }

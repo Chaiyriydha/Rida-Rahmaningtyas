@@ -19,6 +19,7 @@ import {
   XCircle,
   Calendar as CalendarIcon,
   Building2,
+  ArrowRight,
   User,
   FileText,
   Eye,
@@ -28,7 +29,8 @@ import {
   UserCog,
   LogOut,
   LogIn,
-  AlertTriangle
+  AlertTriangle,
+  Pencil
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -88,7 +90,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 
-import { SKPRecord, SKPStatus, SKPPeriode, PLTRecord, PLHRecord, PLTStatus } from './types';
+import { SKPRecord, SKPStatus, SKPPeriode, PLTRecord, PLHRecord, PLTStatus, WorkTeam, TeamMember } from './types';
 
 enum OperationType {
   CREATE = 'create',
@@ -123,7 +125,8 @@ import {
   JENIS_DOKUMEN_LIST,
   RATING_HASIL_KERJA_LIST,
   RATING_PERILAKU_LIST,
-  PREDIKAT_KINERJA_LIST
+  PREDIKAT_KINERJA_LIST,
+  STATUS_PEGAWAI_LIST
 } from './constants';
 import { cn } from '@/lib/utils';
 import { db, auth } from './lib/firebase';
@@ -139,13 +142,33 @@ import {
 } from 'recharts';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'skp' | 'plt-plh'>('skp');
+  const [activeTab, setActiveTab] = useState<'tim-kerja' | 'skp' | 'plt-plh'>('tim-kerja');
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [records, setRecords] = useState<SKPRecord[]>([]);
   const [pltRecords, setPltRecords] = useState<PLTRecord[]>([]);
   const [plhRecords, setPlhRecords] = useState<PLHRecord[]>([]);
+  const [workTeams, setWorkTeams] = useState<WorkTeam[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const groupedTeams = useMemo(() => {
+    const groups: Record<string, { topLevel: WorkTeam[], subTeams: Record<string, WorkTeam[]> }> = {};
+    workTeams.forEach(team => {
+      if (!groups[team.unitKerja]) {
+        groups[team.unitKerja] = { topLevel: [], subTeams: {} };
+      }
+      
+      if (!team.parentId) {
+        groups[team.unitKerja].topLevel.push(team);
+      } else {
+        if (!groups[team.unitKerja].subTeams[team.parentId]) {
+          groups[team.unitKerja].subTeams[team.parentId] = [];
+        }
+        groups[team.unitKerja].subTeams[team.parentId].push(team);
+      }
+    });
+    return groups;
+  }, [workTeams]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [statusFilterPlt, setStatusFilterPlt] = useState<string>('all');
   const [statusFilterPlh, setStatusFilterPlh] = useState<string>('all');
@@ -161,9 +184,19 @@ export default function App() {
   const [editingRecord, setEditingRecord] = useState<SKPRecord | null>(null);
   const [editingPltRecord, setEditingPltRecord] = useState<PLTRecord | null>(null);
   const [editingPlhRecord, setEditingPlhRecord] = useState<PLHRecord | null>(null);
+  const [pltPlhType, setPltPlhType] = useState<'PLT' | 'PLH'>('PLT');
   const [isEditPltPlhDialogOpen, setIsEditPltPlhDialogOpen] = useState(false);
+  const [isAddTeamDialogOpen, setIsAddTeamDialogOpen] = useState(false);
+  const [isEditTeamDialogOpen, setIsEditTeamDialogOpen] = useState(false);
+  const [editingTeam, setEditingTeam] = useState<WorkTeam | null>(null);
+  const [jenisAddTeam, setJenisAddTeam] = useState<'Tim Kerja' | 'Bagian'>('Tim Kerja');
+  const [jenisEditTeam, setJenisEditTeam] = useState<'Tim Kerja' | 'Bagian'>('Tim Kerja');
+  const [isAddMemberDialogOpen, setIsAddMemberDialogOpen] = useState(false);
+  const [isEditMemberDialogOpen, setIsEditMemberDialogOpen] = useState(false);
+  const [selectedTeamForMember, setSelectedTeamForMember] = useState<string | null>(null);
+  const [editingMemberInfo, setEditingMemberInfo] = useState<{ teamId: string, member: TeamMember, index: number } | null>(null);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'PLT' | 'PLH' } | null>(null);
+  const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'PLT' | 'PLH' | 'TIM' } | null>(null);
   const [viewingFileUrl, setViewingFileUrl] = useState<string | null>(null);
   const [viewingFileName, setViewingFileName] = useState<string | null>(null);
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
@@ -220,10 +253,22 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'plh_records');
     });
 
+    const qWorkTeams = query(collection(db, 'work_teams'), orderBy('namaTim', 'asc'));
+    const unsubWorkTeams = onSnapshot(qWorkTeams, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as WorkTeam[];
+      setWorkTeams(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'work_teams');
+    });
+
     return () => {
       unsubSkp();
       unsubPlt();
       unsubPlh();
+      unsubWorkTeams();
     };
   }, [user]);
 
@@ -246,6 +291,60 @@ export default function App() {
       console.error("Logout Error:", error);
     }
   };
+
+  // Auto-update status for expired PLT/PLH records
+  React.useEffect(() => {
+    if (!user) return;
+
+    const checkExpiredRecords = async () => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Check PLH records
+      if (plhRecords.length > 0) {
+        for (const record of plhRecords) {
+          if (record.status === 'Aktif' && record.tglSelesai) {
+            const endDate = new Date(record.tglSelesai);
+            endDate.setHours(0, 0, 0, 0);
+
+            if (endDate < today) {
+              try {
+                await updateDoc(doc(db, 'plh_records', record.id), {
+                  status: 'Selesai',
+                  updatedAt: serverTimestamp()
+                });
+              } catch (error) {
+                console.error(`Failed to auto-update PLH record ${record.id}:`, error);
+              }
+            }
+          }
+        }
+      }
+
+      // Check PLT records (if they have tglSelesai)
+      if (pltRecords.length > 0) {
+        for (const record of pltRecords) {
+          if (record.status === 'Aktif' && record.tglSelesai) {
+            const endDate = new Date(record.tglSelesai);
+            endDate.setHours(0, 0, 0, 0);
+
+            if (endDate < today) {
+              try {
+                await updateDoc(doc(db, 'plt_records', record.id), {
+                  status: 'Selesai',
+                  updatedAt: serverTimestamp()
+                });
+              } catch (error) {
+                console.error(`Failed to auto-update PLT record ${record.id}:`, error);
+              }
+            }
+          }
+        }
+      }
+    };
+
+    checkExpiredRecords();
+  }, [user, plhRecords, pltRecords]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -420,10 +519,12 @@ export default function App() {
         jabatanAsli: formData.get('jabatanAsli') as string,
         [type === 'PLT' ? 'jabatanPlt' : 'jabatanPlh']: formData.get('jabatanTugas') as string,
         unitKerja: formData.get('unitKerja') as string,
+        unitKerjaTugas: formData.get('unitKerjaTugas') as string,
         noSk: formData.get('noSk') as string,
         tglMulai: formData.get('tglMulai') as string,
-        tglSelesai: formData.get('tglSelesai') as string,
+        ...(type === 'PLH' && { tglSelesai: formData.get('tglSelesai') as string }),
         status: 'Aktif' as PLTStatus,
+        keterangan: formData.get('keterangan') as string,
         authorUid: user.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -501,10 +602,12 @@ export default function App() {
         jabatanAsli: formData.get('jabatanAsli') as string,
         [type === 'PLT' ? 'jabatanPlt' : 'jabatanPlh']: formData.get('jabatanTugas') as string,
         unitKerja: formData.get('unitKerja') as string,
+        unitKerjaTugas: formData.get('unitKerjaTugas') as string,
         noSk: formData.get('noSk') as string,
         tglMulai: formData.get('tglMulai') as string,
-        tglSelesai: formData.get('tglSelesai') as string,
+        ...(type === 'PLH' && { tglSelesai: formData.get('tglSelesai') as string }),
         status: formData.get('status') as PLTStatus,
+        keterangan: formData.get('keterangan') as string,
         updatedAt: serverTimestamp(),
       };
 
@@ -515,6 +618,139 @@ export default function App() {
       toast.success(`Data ${type} berhasil diperbarui`);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `${collectionName}/${editingData.id}`);
+    }
+  };
+
+  const handleAddTeam = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user) return;
+
+    const formData = new FormData(e.currentTarget);
+    const namaTim = formData.get('namaTim') as string;
+    const unitKerja = formData.get('unitKerja') as string;
+    const tahun = parseInt(formData.get('tahun') as string);
+    const ketuaNama = formData.get('ketuaNama') as string;
+    const ketuaJabatan = formData.get('ketuaJabatan') as string;
+    const ketuaStatus = formData.get('ketuaStatus') as string;
+    const jenis = formData.get('jenis') as 'Tim Kerja' | 'Bagian';
+    const parentId = formData.get('parentId') as string;
+
+    try {
+      const newTeam = {
+        namaTim,
+        unitKerja,
+        tahun,
+        status: 'Aktif',
+        jenis,
+        parentId: parentId || null,
+        ketua: {
+          nama: ketuaNama,
+          jabatan: ketuaJabatan,
+          status: ketuaStatus
+        },
+        anggota: [], // Initial empty members, can be added via edit
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'work_teams'), newTeam);
+      setIsAddTeamDialogOpen(false);
+      toast.success('Tim Kerja berhasil ditambahkan');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'work_teams');
+    }
+  };
+
+  const handleUpdateTeam = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user || !editingTeam) return;
+
+    const formData = new FormData(e.currentTarget);
+    const namaTim = formData.get('namaTim') as string;
+    const unitKerja = formData.get('unitKerja') as string;
+    const tahun = parseInt(formData.get('tahun') as string);
+    const status = formData.get('status') as 'Aktif' | 'Non-Aktif';
+    const ketuaNama = formData.get('ketuaNama') as string;
+    const ketuaJabatan = formData.get('ketuaJabatan') as string;
+    const ketuaStatus = formData.get('ketuaStatus') as string;
+    const jenis = formData.get('jenis') as 'Tim Kerja' | 'Bagian';
+    const parentId = formData.get('parentId') as string;
+
+    try {
+      const updatedData = {
+        namaTim,
+        unitKerja,
+        tahun,
+        status,
+        jenis,
+        parentId: parentId || null,
+        ketua: {
+          nama: ketuaNama,
+          jabatan: ketuaJabatan,
+          status: ketuaStatus
+        },
+        updatedAt: serverTimestamp(),
+      };
+
+      await updateDoc(doc(db, 'work_teams', editingTeam.id), updatedData);
+      setIsEditTeamDialogOpen(false);
+      setEditingTeam(null);
+      toast.success('Tim Kerja berhasil diperbarui');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `work_teams/${editingTeam.id}`);
+    }
+  };
+
+  const handleAddMember = async (teamId: string, member: TeamMember) => {
+    if (!user) return;
+    const team = workTeams.find(t => t.id === teamId);
+    if (!team) return;
+
+    try {
+      const updatedAnggota = [...team.anggota, member];
+      await updateDoc(doc(db, 'work_teams', teamId), {
+        anggota: updatedAnggota,
+        updatedAt: serverTimestamp()
+      });
+      toast.success('Anggota berhasil ditambahkan');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `work_teams/${teamId}`);
+    }
+  };
+
+  const handleRemoveMember = async (teamId: string, memberNama: string) => {
+    if (!user) return;
+    const team = workTeams.find(t => t.id === teamId);
+    if (!team) return;
+
+    try {
+      const updatedAnggota = team.anggota.filter(m => m.nama !== memberNama);
+      await updateDoc(doc(db, 'work_teams', teamId), {
+        anggota: updatedAnggota,
+        updatedAt: serverTimestamp()
+      });
+      toast.success('Anggota berhasil dihapus');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `work_teams/${teamId}`);
+    }
+  };
+
+  const handleUpdateMember = async (teamId: string, memberIndex: number, updatedMember: TeamMember) => {
+    if (!user) return;
+    const team = workTeams.find(t => t.id === teamId);
+    if (!team) return;
+
+    try {
+      const updatedAnggota = [...team.anggota];
+      updatedAnggota[memberIndex] = updatedMember;
+      await updateDoc(doc(db, 'work_teams', teamId), {
+        anggota: updatedAnggota,
+        updatedAt: serverTimestamp()
+      });
+      toast.success('Informasi anggota berhasil diperbarui');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `work_teams/${teamId}`);
     }
   };
 
@@ -583,7 +819,7 @@ export default function App() {
   const confirmDelete = async () => {
     if (!deletingInfo) return;
     const { id, type } = deletingInfo;
-    const collectionName = type === 'SKP' ? 'skp_records' : (type === 'PLT' ? 'plt_records' : 'plh_records');
+    const collectionName = type === 'SKP' ? 'skp_records' : (type === 'PLT' ? 'plt_records' : (type === 'PLH' ? 'plh_records' : 'work_teams'));
     
     try {
       await deleteDoc(doc(db, collectionName, id));
@@ -650,10 +886,12 @@ export default function App() {
         'NIP': record.nip,
         'Jabatan Asli': record.jabatanAsli,
         'Jabatan PLT': record.jabatanPlt,
-        'Unit Kerja': record.unitKerja,
+        'Unit Kerja Asal': record.unitKerja,
+        'Unit Kerja Penugasan': record.unitKerjaTugas,
         'Nomor SK': record.noSk,
+        'Alasan/Keterangan': record.keterangan || '-',
         'Tanggal Mulai': format(new Date(record.tglMulai), 'dd MMMM yyyy', { locale: id }),
-        'Tanggal Selesai': format(new Date(record.tglSelesai), 'dd MMMM yyyy', { locale: id }),
+        'Tanggal Selesai': record.tglSelesai ? format(new Date(record.tglSelesai), 'dd MMMM yyyy', { locale: id }) : 'Selesai',
         'Status': record.status
       }));
       const pltSheet = XLSX.utils.json_to_sheet(pltData);
@@ -672,8 +910,10 @@ export default function App() {
         'NIP': record.nip,
         'Jabatan Asli': record.jabatanAsli,
         'Jabatan PLH': record.jabatanPlh,
-        'Unit Kerja': record.unitKerja,
+        'Unit Kerja Asal': record.unitKerja,
+        'Unit Kerja Penugasan': record.unitKerjaTugas,
         'Nomor SK': record.noSk,
+        'Alasan/Keterangan': record.keterangan || '-',
         'Tanggal Mulai': format(new Date(record.tglMulai), 'dd MMMM yyyy', { locale: id }),
         'Tanggal Selesai': format(new Date(record.tglSelesai), 'dd MMMM yyyy', { locale: id }),
         'Status': record.status
@@ -691,6 +931,142 @@ export default function App() {
     XLSX.writeFile(workbook, `Data_PLT_PLH_Export_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
     toast.success('Data PLT & PLH berhasil diekspor ke Excel');
   };
+
+  const renderTeamCard = (team: WorkTeam, isSubTeam = false) => (
+    <Card key={team.id} className={`overflow-hidden border-none shadow-sm hover:shadow-md transition-all group ${isSubTeam ? 'border-l-4 border-l-primary/20 bg-primary/5' : ''}`}>
+      <CardHeader className={`${isSubTeam ? 'bg-primary/10' : 'bg-primary/5'} pb-4`}>
+        <div className="flex justify-between items-start">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base font-bold text-primary group-hover:text-primary/80 transition-colors">
+                {team.namaTim}
+              </CardTitle>
+              {team.jenis === 'Bagian' && (
+                <Badge variant="outline" className="text-[8px] h-4 px-1 bg-primary/10 text-primary border-primary/20">
+                  Bagian
+                </Badge>
+              )}
+            </div>
+            <CardDescription className="text-[10px] font-medium uppercase tracking-wider">
+              Tahun {team.tahun}
+            </CardDescription>
+          </div>
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-7 w-7 text-muted-foreground hover:text-primary"
+              onClick={() => {
+                setEditingTeam(team);
+                setJenisEditTeam(team.jenis || 'Tim Kerja');
+                setIsEditTeamDialogOpen(true);
+              }}
+            >
+              <UserCog className="h-3.5 w-3.5" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+              onClick={() => {
+                setDeletingInfo({ id: team.id, type: 'TIM' });
+                setIsDeleteConfirmOpen(true);
+              }}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-4 space-y-4">
+        {/* Ketua Section */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+            <UserCheck className="h-3 w-3" />
+            {team.jenis === 'Bagian' ? 'Kepala Bagian' : 'Ketua Tim'}
+          </div>
+          <div className="flex flex-col bg-muted/30 p-2 rounded-lg border border-muted-foreground/5">
+            <div className="flex justify-between items-start">
+              <span className="text-sm font-bold">{team.ketua.nama}</span>
+              <Badge variant="secondary" className="text-[8px] h-3.5 px-1 py-0 bg-primary/10 text-primary border-none">
+                {team.ketua.status}
+              </Badge>
+            </div>
+            <span className="text-[10px] text-muted-foreground font-medium italic">{team.ketua.jabatan}</span>
+          </div>
+        </div>
+
+        {/* Anggota Section */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+              <Users className="h-3 w-3" />
+              Anggota ({team.anggota.length})
+            </div>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10"
+              onClick={() => {
+                setSelectedTeamForMember(team.id);
+                setIsAddMemberDialogOpen(true);
+              }}
+            >
+              <Plus className="h-3 w-3 mr-1" />
+              Tambah
+            </Button>
+          </div>
+          
+          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1 custom-scrollbar">
+            {team.anggota.length > 0 ? (
+              team.anggota.map((member) => (
+                <div key={member.nama} className="flex items-center justify-between group/member bg-white p-2 rounded-md border border-muted shadow-sm hover:border-primary/20 transition-colors">
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-bold truncate">{member.nama}</span>
+                    <span className="text-[10px] text-muted-foreground font-medium italic leading-tight">{member.jabatan}</span>
+                    <div className="mt-1">
+                      <Badge variant="outline" className="text-[8px] h-3.5 px-1 py-0 border-muted-foreground/20 text-muted-foreground">
+                        {member.status}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover/member:opacity-100 transition-opacity">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6 text-muted-foreground hover:text-primary"
+                      onClick={() => {
+                        setEditingMemberInfo({ 
+                          teamId: team.id, 
+                          member: member, 
+                          index: team.anggota.indexOf(member) 
+                        });
+                        setIsEditMemberDialogOpen(true);
+                      }}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleRemoveMember(team.id, member.nama)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-4 border border-dashed rounded-lg">
+                <p className="text-[10px] text-muted-foreground italic">Belum ada anggota</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
   return (
     <div className="flex min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans selection:bg-primary/20">
@@ -712,6 +1088,17 @@ export default function App() {
           </div>
 
           <nav className="flex flex-col gap-2">
+            <Button 
+              variant={activeTab === 'tim-kerja' ? 'default' : 'ghost'} 
+              className={cn(
+                "justify-start gap-3 h-10 px-4 transition-all", 
+                activeTab === 'tim-kerja' ? "shadow-sm" : "text-muted-foreground"
+              )}
+              onClick={() => setActiveTab('tim-kerja')}
+            >
+              <Users className="h-4 w-4" />
+              Tim Kerja
+            </Button>
             <Button 
               variant={activeTab === 'skp' ? 'default' : 'ghost'} 
               className={cn(
@@ -778,11 +1165,119 @@ export default function App() {
 
             <div className="hidden md:block">
               <h2 className="text-sm font-semibold text-muted-foreground">
-                {activeTab === 'skp' ? 'Monitoring SKP Pegawai' : 'Monitoring PLT & PLH'}
+                {activeTab === 'tim-kerja' ? 'Monitoring Tim Kerja' : activeTab === 'skp' ? 'Monitoring SKP Pegawai' : 'Monitoring PLT & PLH'}
               </h2>
             </div>
 
             <div className="flex items-center gap-3">
+              {user && activeTab === 'tim-kerja' && (
+                <Dialog open={isAddTeamDialogOpen} onOpenChange={setIsAddTeamDialogOpen}>
+                  <DialogTrigger 
+                    nativeButton={true}
+                    render={<Button size="sm" className="gap-2 h-9 shadow-sm" />}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Tambah Tim Kerja
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[500px]">
+                    <form onSubmit={handleAddTeam}>
+                      <DialogHeader>
+                        <DialogTitle>Tambah Tim Kerja Baru</DialogTitle>
+                        <DialogDescription>
+                          Buat tim kerja baru untuk monitoring penugasan.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+                        <div className="grid gap-2">
+                          <Label htmlFor="jenis">Jenis</Label>
+                          <Select name="jenis" defaultValue="Tim Kerja" onValueChange={(v: any) => setJenisAddTeam(v)} required>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Pilih Jenis" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Tim Kerja">Tim Kerja</SelectItem>
+                              <SelectItem value="Bagian">Bagian</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {jenisAddTeam === 'Tim Kerja' && (
+                          <div className="grid gap-2">
+                            <Label htmlFor="parentId">Bagian (Opsional)</Label>
+                            <Select name="parentId">
+                              <SelectTrigger>
+                                <SelectValue placeholder="Pilih Bagian" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="">Tanpa Bagian</SelectItem>
+                                {workTeams.filter(t => t.jenis === 'Bagian').map(bagian => (
+                                  <SelectItem key={bagian.id} value={bagian.id}>{bagian.namaTim}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                        <div className="grid gap-2">
+                          <Label htmlFor="namaTim">{jenisAddTeam === 'Bagian' ? 'Nama Bagian' : 'Nama Tim Kerja'}</Label>
+                          <Input id="namaTim" name="namaTim" placeholder={jenisAddTeam === 'Bagian' ? 'Contoh: Bagian Tata Usaha' : 'Contoh: Tim Kerja Kepegawaian'} required />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="unitKerja">Unit Kerja</Label>
+                          <Select name="unitKerja" required>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Pilih Unit Kerja" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {UNIT_KERJA_LIST.map(unit => (
+                                <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="tahun">Tahun</Label>
+                            <Input id="tahun" name="tahun" type="number" defaultValue={new Date().getFullYear()} required />
+                          </div>
+                        </div>
+                        <div className="border-t pt-4 mt-2">
+                          <Label className="text-primary font-bold">Ketua Tim</Label>
+                          <div className="grid gap-4 mt-2">
+                            <div className="grid gap-2">
+                              <Label htmlFor="ketuaNama">Nama Ketua</Label>
+                              <Input id="ketuaNama" name="ketuaNama" placeholder="Nama lengkap ketua" required />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="ketuaJabatan">Jabatan Ketua</Label>
+                              <Input id="ketuaJabatan" name="ketuaJabatan" placeholder="Jabatan ketua" required />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="ketuaStatus">Status Ketua</Label>
+                              <Select name="ketuaStatus" required>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Pilih Status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {STATUS_PEGAWAI_LIST.map(status => (
+                                    <SelectItem key={status} value={status}>{status}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <DialogClose 
+                          nativeButton={true}
+                          render={<Button type="button" variant="outline">Batal</Button>} 
+                        />
+                        <Button type="submit">Simpan Tim Kerja</Button>
+                      </DialogFooter>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              )}
+
               {user && activeTab === 'skp' && (
                 <>
                   <Button 
@@ -818,7 +1313,7 @@ export default function App() {
                               Masukkan informasi pegawai untuk monitoring berkas SKP.
                             </DialogDescription>
                           </DialogHeader>
-                          <div className="grid gap-4 py-4">
+                          <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div className="grid gap-2">
                                 <Label htmlFor="namaPegawai">Nama Lengkap</Label>
@@ -1035,10 +1530,15 @@ export default function App() {
                             Masukkan informasi penugasan PLT atau PLH pegawai.
                           </DialogDescription>
                         </DialogHeader>
-                        <div className="grid gap-4 py-4">
+                        <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
                           <div className="grid gap-2">
                             <Label>Jenis Penugasan</Label>
-                            <Select name="type" defaultValue="PLT" required>
+                            <Select 
+                              name="type" 
+                              defaultValue={pltPlhType} 
+                              onValueChange={(value: 'PLT' | 'PLH') => setPltPlhType(value)}
+                              required
+                            >
                               <SelectTrigger>
                                 <SelectValue placeholder="Pilih Jenis" />
                               </SelectTrigger>
@@ -1073,7 +1573,7 @@ export default function App() {
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="grid gap-2">
-                              <Label htmlFor="unitKerja">Unit Kerja</Label>
+                              <Label htmlFor="unitKerja">Unit Kerja Asal</Label>
                               <Select name="unitKerja" required>
                                 <SelectTrigger>
                                   <SelectValue placeholder="Pilih Unit Kerja" />
@@ -1086,20 +1586,41 @@ export default function App() {
                               </Select>
                             </div>
                             <div className="grid gap-2">
-                              <Label htmlFor="noSk">Nomor SK</Label>
-                              <Input id="noSk" name="noSk" placeholder="Nomor Surat Keputusan" required />
+                              <Label htmlFor="unitKerjaTugas">Unit Kerja Penugasan</Label>
+                              <Select name="unitKerjaTugas" required>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Pilih Unit Kerja" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {UNIT_KERJA_LIST.map(unit => (
+                                    <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="noSk">Nomor SK</Label>
+                            <Input id="noSk" name="noSk" placeholder="Nomor Surat Keputusan" required />
+                          </div>
+
+                          <div className="grid gap-2">
+                            <Label htmlFor="keterangan">Alasan / Keterangan Penugasan</Label>
+                            <Input id="keterangan" name="keterangan" placeholder="Alasan penugasan PLT/PLH" />
+                          </div>
+
+                          <div className={cn("grid gap-4", pltPlhType === 'PLH' ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1")}>
                             <div className="grid gap-2">
                               <Label htmlFor="tglMulai">Tanggal Mulai</Label>
                               <Input id="tglMulai" name="tglMulai" type="date" required />
                             </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="tglSelesai">Tanggal Selesai</Label>
-                              <Input id="tglSelesai" name="tglSelesai" type="date" required />
-                            </div>
+                            {pltPlhType === 'PLH' && (
+                              <div className="grid gap-2">
+                                <Label htmlFor="tglSelesai">Tanggal Selesai</Label>
+                                <Input id="tglSelesai" name="tglSelesai" type="date" required />
+                              </div>
+                            )}
                           </div>
                         </div>
                         <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
@@ -1137,7 +1658,7 @@ export default function App() {
                           Perbarui informasi pegawai jika terjadi mutasi atau perubahan data lainnya.
                         </DialogDescription>
                       </DialogHeader>
-                      <div className="grid gap-4 py-4">
+                      <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="grid gap-2">
                             <Label htmlFor="edit-namaPegawai">Nama Lengkap</Label>
@@ -1341,7 +1862,62 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8">
-        {activeTab === 'skp' ? (
+        {activeTab === 'tim-kerja' ? (
+          <div className="space-y-6">
+            {Object.keys(groupedTeams).length > 0 ? (
+              (Object.entries(groupedTeams) as [string, { topLevel: WorkTeam[], subTeams: Record<string, WorkTeam[]> }][]).map(([unitKerja, data]) => (
+                <div key={unitKerja} className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-5 w-5 text-primary" />
+                    <h3 className="text-lg font-bold text-[#1A4A9A]">{unitKerja}</h3>
+                    <Badge variant="outline" className="ml-2 bg-primary/5 text-primary border-primary/20">
+                      {data.topLevel.length + Object.values(data.subTeams).flat().length} Tim
+                    </Badge>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    {data.topLevel.map((team) => (
+                      <div key={team.id} className="space-y-4">
+                        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                          {renderTeamCard(team)}
+                        </div>
+                        {data.subTeams[team.id] && data.subTeams[team.id].length > 0 && (
+                          <div className="ml-8 pl-4 border-l-2 border-primary/10 space-y-4">
+                            <div className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest">
+                              <ArrowRight className="h-3 w-3" />
+                              Tim Kerja di bawah {team.namaTim}
+                            </div>
+                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                              {data.subTeams[team.id].map(subTeam => renderTeamCard(subTeam, true))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed shadow-sm">
+                <div className="h-16 w-16 rounded-full bg-primary/5 flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-primary/40" />
+                </div>
+                <h3 className="text-lg font-bold text-muted-foreground">Belum Ada Tim Kerja</h3>
+                <p className="text-sm text-muted-foreground/60 max-w-xs text-center mt-1">
+                  Mulai dengan menambahkan tim kerja baru untuk memantau penugasan di setiap unit kerja.
+                </p>
+                <Button 
+                  variant="outline" 
+                  className="mt-6 gap-2"
+                  onClick={() => setIsAddTeamDialogOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Tambah Tim Pertama
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'skp' ? (
           <>
             {/* Stats Grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -1790,7 +2366,7 @@ export default function App() {
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Pegawai</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Penugasan</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja</TableHead>
+                        <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja (Asal/Tugas)</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Periode</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Status</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider text-right">Aksi</TableHead>
@@ -1811,18 +2387,33 @@ export default function App() {
                               <div className="flex flex-col">
                                 <span className="font-medium text-sm text-primary">{record.jabatanPlt}</span>
                                 <span className="text-[10px] text-muted-foreground font-medium">SK: {record.noSk}</span>
+                                {record.keterangan && (
+                                  <span className="text-[10px] text-muted-foreground mt-1 bg-muted/50 px-1.5 py-0.5 rounded border border-muted-foreground/10">
+                                    Ket: {record.keterangan}
+                                  </span>
+                                )}
                               </div>
                             </TableCell>
                             <TableCell>
-                              <div className="flex items-center gap-2 text-sm">
-                                <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                {record.unitKerja}
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2 text-sm">
+                                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                  <span className="font-medium">Asal:</span> {record.unitKerja}
+                                </div>
+                                <div className="flex items-center gap-2 text-sm">
+                                  <ArrowRight className="h-3.5 w-3.5 text-primary" />
+                                  <span className="font-medium">Tugas:</span> {record.unitKerjaTugas}
+                                </div>
                               </div>
                             </TableCell>
                             <TableCell>
                               <div className="flex flex-col text-xs">
                                 <span>{format(new Date(record.tglMulai), 'dd MMM yyyy')}</span>
-                                <span className="text-muted-foreground">s.d. {format(new Date(record.tglSelesai), 'dd MMM yyyy')}</span>
+                                <span className="text-muted-foreground">
+                                  {record.tglSelesai 
+                                    ? `s.d. ${format(new Date(record.tglSelesai), 'dd MMM yyyy')}` 
+                                    : 's.d. Selesai'}
+                                </span>
                               </div>
                             </TableCell>
                             <TableCell>
@@ -1929,7 +2520,7 @@ export default function App() {
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Pegawai</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Penugasan</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja</TableHead>
+                        <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja (Asal/Tugas)</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Periode</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Status</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider text-right">Aksi</TableHead>
@@ -1950,12 +2541,23 @@ export default function App() {
                               <div className="flex flex-col">
                                 <span className="font-medium text-sm text-blue-600">{record.jabatanPlh}</span>
                                 <span className="text-[10px] text-muted-foreground font-medium">SK: {record.noSk}</span>
+                                {record.keterangan && (
+                                  <span className="text-[10px] text-muted-foreground mt-1 bg-muted/50 px-1.5 py-0.5 rounded border border-muted-foreground/10">
+                                    Ket: {record.keterangan}
+                                  </span>
+                                )}
                               </div>
                             </TableCell>
                             <TableCell>
-                              <div className="flex items-center gap-2 text-sm">
-                                <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                {record.unitKerja}
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2 text-sm">
+                                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                  <span className="font-medium">Asal:</span> {record.unitKerja}
+                                </div>
+                                <div className="flex items-center gap-2 text-sm">
+                                  <ArrowRight className="h-3.5 w-3.5 text-primary" />
+                                  <span className="font-medium">Tugas:</span> {record.unitKerjaTugas}
+                                </div>
                               </div>
                             </TableCell>
                             <TableCell>
@@ -2033,7 +2635,7 @@ export default function App() {
                   Perbarui informasi penugasan pegawai.
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-6 py-6">
+              <div className="grid gap-6 py-6 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
                 <input type="hidden" name="type" value={editingPltRecord ? 'PLT' : 'PLH'} />
                 
                 <div className="grid gap-2">
@@ -2091,18 +2693,33 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-unitKerja">Unit Kerja</Label>
-                  <Select name="unitKerja" defaultValue={editingPltRecord?.unitKerja || editingPlhRecord?.unitKerja}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih Unit Kerja" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {UNIT_KERJA_LIST.map(unit => (
-                        <SelectItem key={unit} value={unit}>{unit}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-unitKerja">Unit Kerja Asal</Label>
+                    <Select name="unitKerja" defaultValue={editingPltRecord?.unitKerja || editingPlhRecord?.unitKerja}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pilih Unit Kerja" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UNIT_KERJA_LIST.map(unit => (
+                          <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-unitKerjaTugas">Unit Kerja Penugasan</Label>
+                    <Select name="unitKerjaTugas" defaultValue={editingPltRecord?.unitKerjaTugas || editingPlhRecord?.unitKerjaTugas}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pilih Unit Kerja" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UNIT_KERJA_LIST.map(unit => (
+                          <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="grid gap-2">
@@ -2115,7 +2732,17 @@ export default function App() {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-keterangan">Alasan / Keterangan Penugasan</Label>
+                  <Input 
+                    id="edit-keterangan" 
+                    name="keterangan" 
+                    defaultValue={editingPltRecord?.keterangan || editingPlhRecord?.keterangan} 
+                    placeholder="Alasan penugasan PLT/PLH"
+                  />
+                </div>
+
+                <div className={cn("grid gap-4", editingPlhRecord ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1")}>
                   <div className="grid gap-2">
                     <Label htmlFor="edit-tglMulai">Tanggal Mulai</Label>
                     <Input 
@@ -2126,16 +2753,18 @@ export default function App() {
                       required 
                     />
                   </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="edit-tglSelesai">Tanggal Selesai</Label>
-                    <Input 
-                      id="edit-tglSelesai" 
-                      name="tglSelesai" 
-                      type="date" 
-                      defaultValue={editingPltRecord?.tglSelesai || editingPlhRecord?.tglSelesai} 
-                      required 
-                    />
-                  </div>
+                  {editingPlhRecord && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-tglSelesai">Tanggal Selesai</Label>
+                      <Input 
+                        id="edit-tglSelesai" 
+                        name="tglSelesai" 
+                        type="date" 
+                        defaultValue={editingPlhRecord?.tglSelesai} 
+                        required 
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
               <DialogFooter>
@@ -2437,6 +3066,240 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Team Dialog */}
+      <Dialog open={isEditTeamDialogOpen} onOpenChange={(open) => {
+        setIsEditTeamDialogOpen(open);
+        if (!open) setEditingTeam(null);
+      }}>
+        <DialogContent className="sm:max-w-[500px]">
+          {editingTeam && (
+            <form onSubmit={handleUpdateTeam}>
+              <DialogHeader>
+                <DialogTitle>Edit Tim Kerja</DialogTitle>
+                <DialogDescription>
+                  Perbarui informasi tim kerja dan ketua tim.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-jenis">Jenis</Label>
+                  <Select name="jenis" defaultValue={editingTeam.jenis || 'Tim Kerja'} onValueChange={(v: any) => setJenisEditTeam(v)} required>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih Jenis" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Tim Kerja">Tim Kerja</SelectItem>
+                      <SelectItem value="Bagian">Bagian</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {jenisEditTeam === 'Tim Kerja' && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-parentId">Bagian (Opsional)</Label>
+                    <Select name="parentId" defaultValue={editingTeam.parentId || ""}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pilih Bagian" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Tanpa Bagian</SelectItem>
+                        {workTeams.filter(t => t.jenis === 'Bagian' && t.id !== editingTeam.id).map(bagian => (
+                          <SelectItem key={bagian.id} value={bagian.id}>{bagian.namaTim}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-namaTim">{jenisEditTeam === 'Bagian' ? 'Nama Bagian' : 'Nama Tim Kerja'}</Label>
+                  <Input id="edit-namaTim" name="namaTim" defaultValue={editingTeam.namaTim} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-unitKerja">Unit Kerja</Label>
+                  <Select name="unitKerja" defaultValue={editingTeam.unitKerja} required>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih Unit Kerja" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UNIT_KERJA_LIST.map(unit => (
+                        <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-tahun">Tahun</Label>
+                    <Input id="edit-tahun" name="tahun" type="number" defaultValue={editingTeam.tahun} required />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-status">Status</Label>
+                    <Select name="status" defaultValue={editingTeam.status} required>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pilih Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Aktif">Aktif</SelectItem>
+                        <SelectItem value="Non-Aktif">Non-Aktif</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="border-t pt-4 mt-2">
+                  <Label className="text-primary font-bold">Ketua Tim</Label>
+                  <div className="grid gap-4 mt-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-ketuaNama">Nama Ketua</Label>
+                      <Input id="edit-ketuaNama" name="ketuaNama" defaultValue={editingTeam.ketua.nama} required />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-ketuaJabatan">Jabatan Ketua</Label>
+                      <Input id="edit-ketuaJabatan" name="ketuaJabatan" defaultValue={editingTeam.ketua.jabatan} required />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-ketuaStatus">Status Ketua</Label>
+                      <Select name="ketuaStatus" defaultValue={editingTeam.ketua.status} required>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STATUS_PEGAWAI_LIST.map(status => (
+                            <SelectItem key={status} value={status}>{status}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <DialogClose 
+                  nativeButton={true}
+                  render={<Button type="button" variant="outline">Batal</Button>} 
+                />
+                <Button type="submit">Simpan Perubahan</Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Member Dialog */}
+      <Dialog open={isAddMemberDialogOpen} onOpenChange={(open) => {
+        setIsAddMemberDialogOpen(open);
+        if (!open) setSelectedTeamForMember(null);
+      }}>
+        <DialogContent className="sm:max-w-[400px]">
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (!selectedTeamForMember) return;
+            const formData = new FormData(e.currentTarget);
+            const member: TeamMember = {
+              nama: formData.get('nama') as string,
+              jabatan: formData.get('jabatan') as string,
+              status: formData.get('status') as string,
+            };
+            handleAddMember(selectedTeamForMember, member);
+            setIsAddMemberDialogOpen(false);
+          }}>
+            <DialogHeader>
+              <DialogTitle>Tambah Anggota Tim</DialogTitle>
+              <DialogDescription>
+                Masukkan informasi anggota tim kerja baru.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+              <div className="grid gap-2">
+                <Label htmlFor="member-nama">Nama Anggota</Label>
+                <Input id="member-nama" name="nama" placeholder="Nama lengkap anggota" required />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="member-jabatan">Jabatan Anggota</Label>
+                <Input id="member-jabatan" name="jabatan" placeholder="Jabatan anggota" required />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="member-status">Status</Label>
+                <Select name="status" defaultValue="PNS" required>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_PEGAWAI_LIST.map(status => (
+                      <SelectItem key={status} value={status}>{status}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <DialogClose 
+                nativeButton={true}
+                render={<Button type="button" variant="outline">Batal</Button>} 
+              />
+              <Button type="submit">Tambah Anggota</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Member Dialog */}
+      <Dialog open={isEditMemberDialogOpen} onOpenChange={(open) => {
+        setIsEditMemberDialogOpen(open);
+        if (!open) setEditingMemberInfo(null);
+      }}>
+        <DialogContent className="sm:max-w-[400px]">
+          {editingMemberInfo && (
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              const updatedMember: TeamMember = {
+                nama: formData.get('nama') as string,
+                jabatan: formData.get('jabatan') as string,
+                status: formData.get('status') as string,
+              };
+              handleUpdateMember(editingMemberInfo.teamId, editingMemberInfo.index, updatedMember);
+              setIsEditMemberDialogOpen(false);
+            }}>
+              <DialogHeader>
+                <DialogTitle>Edit Anggota Tim</DialogTitle>
+                <DialogDescription>
+                  Perbarui informasi anggota tim kerja.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-member-nama">Nama Anggota</Label>
+                  <Input id="edit-member-nama" name="nama" defaultValue={editingMemberInfo.member.nama} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-member-jabatan">Jabatan Anggota</Label>
+                  <Input id="edit-member-jabatan" name="jabatan" defaultValue={editingMemberInfo.member.jabatan} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-member-status">Status</Label>
+                  <Select name="status" defaultValue={editingMemberInfo.member.status} required>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATUS_PEGAWAI_LIST.map(status => (
+                        <SelectItem key={status} value={status}>{status}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <DialogClose 
+                  nativeButton={true}
+                  render={<Button type="button" variant="outline">Batal</Button>} 
+                />
+                <Button type="submit">Simpan Perubahan</Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
         <DialogContent className="sm:max-w-[400px]">
@@ -2448,7 +3311,7 @@ export default function App() {
               <DialogTitle>Konfirmasi Hapus</DialogTitle>
             </div>
             <DialogDescription>
-              Apakah Anda yakin ingin menghapus data {deletingInfo?.type === 'SKP' ? 'SKP' : deletingInfo?.type} ini? Tindakan ini tidak dapat dibatalkan.
+              Apakah Anda yakin ingin menghapus data {deletingInfo?.type === 'SKP' ? 'SKP' : (deletingInfo?.type === 'TIM' ? 'Tim Kerja' : deletingInfo?.type)} ini? Tindakan ini tidak dapat dibatalkan.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="mt-4 gap-2 sm:gap-0">
@@ -2466,9 +3329,37 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
-      <footer className="container mx-auto p-8 text-center text-xs text-muted-foreground">
+      <footer className="container mx-auto p-8 text-center text-xs text-muted-foreground mb-16 md:mb-0">
         <p>&copy; {new Date().getFullYear()} Monitoring SKP Pegawai. Sistem Monitoring Berkas Kepegawaian.</p>
       </footer>
+
+      {/* Mobile Navigation */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t z-50 flex items-center justify-around h-16 px-4 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+        <Button 
+          variant="ghost" 
+          className={cn("flex flex-col items-center gap-1 h-auto py-1 px-0 flex-1", activeTab === 'tim-kerja' ? "text-primary" : "text-muted-foreground")}
+          onClick={() => setActiveTab('tim-kerja')}
+        >
+          <Users className="h-5 w-5" />
+          <span className="text-[10px] font-bold">Tim Kerja</span>
+        </Button>
+        <Button 
+          variant="ghost" 
+          className={cn("flex flex-col items-center gap-1 h-auto py-1 px-0 flex-1", activeTab === 'skp' ? "text-primary" : "text-muted-foreground")}
+          onClick={() => setActiveTab('skp')}
+        >
+          <FileText className="h-5 w-5" />
+          <span className="text-[10px] font-bold">SKP</span>
+        </Button>
+        <Button 
+          variant="ghost" 
+          className={cn("flex flex-col items-center gap-1 h-auto py-1 px-0 flex-1", activeTab === 'plt-plh' ? "text-primary" : "text-muted-foreground")}
+          onClick={() => setActiveTab('plt-plh')}
+        >
+          <LayoutDashboard className="h-5 w-5" />
+          <span className="text-[10px] font-bold">PLT/PLH</span>
+        </Button>
+      </div>
     </div>
   </div>
 );

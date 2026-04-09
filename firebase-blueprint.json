@@ -66,6 +66,41 @@
         "authorUid": { "type": "string" }
       },
       "required": ["nip", "namaPegawai", "jabatanPlh", "unitKerja", "status", "authorUid"]
+    },
+    "WorkTeam": {
+      "title": "Work Team",
+      "description": "Monitoring data for Work Teams",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "namaTim": { "type": "string" },
+        "unitKerja": { "type": "string" },
+        "tahun": { "type": "number" },
+        "status": { "type": "string", "enum": ["Aktif", "Non-Aktif"] },
+        "jenis": { "type": "string", "enum": ["Tim Kerja", "Bagian"] },
+        "parentId": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "ketua": {
+          "type": "object",
+          "properties": {
+            "nama": { "type": "string" },
+            "jabatan": { "type": "string" },
+            "status": { "type": "string", "enum": ["PNS", "CPNS", "PPPK", "PPPK Paruh Waktu"] }
+          }
+        },
+        "anggota": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nama": { "type": "string" },
+              "jabatan": { "type": "string" },
+              "status": { "type": "string", "enum": ["PNS", "CPNS", "PPPK", "PPPK Paruh Waktu"] }
+            }
+          }
+        }
+      },
+      "required": ["namaTim", "unitKerja", "tahun", "status", "authorUid", "ketua"]
     }
   },
   "firestore": {
@@ -80,6 +115,10 @@
     "/plh_records/{recordId}": {
       "schema": "PLHRecord",
       "description": "Collection of PLH monitoring records"
+    },
+    "/work_teams/{teamId}": {
+      "schema": "WorkTeam",
+      "description": "Collection of Work Team monitoring records"
     }
   }
 }

@@ -20,6 +20,18 @@ service cloud.firestore {
     //   - authorUid: string (required, immutable)
     //   - status: string (required, enum: ["Aktif", "Selesai"])
     //
+    // Collection: work_teams
+    // Fields:
+    //   - namaTim: string (required)
+    //   - unitKerja: string (required)
+    //   - tahun: number (required)
+    //   - status: string (required, enum: ["Aktif", "Non-Aktif"])
+    //   - jenis: string (required, enum: ["Tim Kerja", "Bagian"])
+    //   - parentId: string (optional)
+    //   - authorUid: string (required, immutable)
+    //   - ketua: map (required)
+    //   - anggota: list (required)
+    //
     // ===============================================================
 
     // ===============================================================
@@ -29,22 +41,39 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "ridarahmaningtyas23@gmail.com" || 
+         request.auth.token.email == "kepegawaian.bskji@gmail.com");
+    }
+
     function isOwner(authorUid) {
       return isAuthenticated() && request.auth.uid == authorUid;
     }
 
     function isValidSKP(data) {
-      return data.nip is string && data.nip.size() > 0 && data.nip.size() <= 20 &&
-             data.namaPegawai is string && data.namaPegawai.size() > 0 && data.namaPegawai.size() <= 100 &&
-             data.status in ["Belum Diambil", "Sudah Diambil"] &&
-             data.authorUid == request.auth.uid;
+      return data.nip is string && data.nip.size() > 0 &&
+             data.namaPegawai is string && data.namaPegawai.size() > 0 &&
+             data.status in ["Belum Diambil", "Sudah Diambil"];
     }
 
     function isValidPLT_PLH(data) {
-      return data.nip is string && data.nip.size() > 0 && data.nip.size() <= 20 &&
-             data.namaPegawai is string && data.namaPegawai.size() > 0 && data.namaPegawai.size() <= 100 &&
-             data.status in ["Aktif", "Selesai"] &&
-             data.authorUid == request.auth.uid;
+      return data.nip is string && data.nip.size() > 0 &&
+             data.namaPegawai is string && data.namaPegawai.size() > 0 &&
+             data.status in ["Aktif", "Selesai"];
+    }
+
+    function isValidWorkTeam(data) {
+      return data.namaTim is string && data.namaTim.size() > 0 &&
+             data.unitKerja is string && data.unitKerja.size() > 0 &&
+             data.tahun is number &&
+             data.status in ["Aktif", "Non-Aktif"] &&
+             data.jenis in ["Tim Kerja", "Bagian"] &&
+             (!("parentId" in data) || data.parentId is string) &&
+             data.ketua is map &&
+             data.ketua.nama is string && data.ketua.nama.size() > 0 &&
+             data.ketua.jabatan is string && data.ketua.jabatan.size() > 0 &&
+             data.anggota is list;
     }
 
     // ===============================================================
@@ -53,29 +82,30 @@ service cloud.firestore {
 
     match /skp_records/{recordId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidSKP(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(resource.data.authorUid) || isAdmin()) && 
-                      isValidSKP(request.resource.data) &&
-                      (request.resource.data.authorUid == resource.data.authorUid || isAdmin());
-      allow delete: if isAuthenticated() && (isOwner(resource.data.authorUid) || isAdmin());
+      allow create: if isAuthenticated() && (isAdmin() || (isValidSKP(request.resource.data) && request.resource.data.authorUid == request.auth.uid));
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.authorUid) && isValidSKP(request.resource.data)));
+      allow delete: if isAuthenticated() && (isAdmin() || isOwner(resource.data.authorUid));
     }
 
     match /plt_records/{recordId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidPLT_PLH(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(resource.data.authorUid) || isAdmin()) && 
-                      isValidPLT_PLH(request.resource.data) &&
-                      (request.resource.data.authorUid == resource.data.authorUid || isAdmin());
-      allow delete: if isAuthenticated() && (isOwner(resource.data.authorUid) || isAdmin());
+      allow create: if isAuthenticated() && (isAdmin() || (isValidPLT_PLH(request.resource.data) && request.resource.data.authorUid == request.auth.uid));
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.authorUid) && isValidPLT_PLH(request.resource.data)));
+      allow delete: if isAuthenticated() && (isAdmin() || isOwner(resource.data.authorUid));
     }
 
     match /plh_records/{recordId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidPLT_PLH(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(resource.data.authorUid) || isAdmin()) && 
-                      isValidPLT_PLH(request.resource.data) &&
-                      (request.resource.data.authorUid == resource.data.authorUid || isAdmin());
-      allow delete: if isAuthenticated() && (isOwner(resource.data.authorUid) || isAdmin());
+      allow create: if isAuthenticated() && (isAdmin() || (isValidPLT_PLH(request.resource.data) && request.resource.data.authorUid == request.auth.uid));
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.authorUid) && isValidPLT_PLH(request.resource.data)));
+      allow delete: if isAuthenticated() && (isAdmin() || isOwner(resource.data.authorUid));
+    }
+
+    match /work_teams/{teamId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isAdmin() || (isValidWorkTeam(request.resource.data) && request.resource.data.authorUid == request.auth.uid));
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.authorUid) && isValidWorkTeam(request.resource.data)));
+      allow delete: if isAuthenticated() && (isAdmin() || isOwner(resource.data.authorUid));
     }
 
     match /users/{userId} {

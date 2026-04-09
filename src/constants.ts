@@ -216,3 +216,10 @@ export const PREDIKAT_KINERJA_LIST = [
   'Kurang',
   'Sangat Kurang',
 ];
+
+export const STATUS_PEGAWAI_LIST = [
+  'PNS',
+  'CPNS',
+  'PPPK',
+  'PPPK Paruh Waktu'
+];
