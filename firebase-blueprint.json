@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "SKPRecord": {
+      "title": "SKP Record",
+      "description": "Monitoring data for SKP (Sasaran Kinerja Pegawai)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nip": { "type": "string" },
+        "namaPegawai": { "type": "string" },
+        "jabatan": { "type": "string" },
+        "unitKerja": { "type": "string" },
+        "tahun": { "type": "number" },
+        "periode": { "type": "string", "enum": ["Tahunan", "Triwulan I", "Triwulan II", "Triwulan III", "Triwulan IV"] },
+        "jenisDokumen": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["Belum Diambil", "Sudah Diambil"] },
+        "ratingHasilKerja": { "type": "string" },
+        "ratingHasilPerilaku": { "type": "string" },
+        "predikatKinerja": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "pengambil": { "type": "string" },
+        "unitKerjaPengambil": { "type": "string" },
+        "tanggalAmbil": { "type": "string", "format": "date-time" },
+        "keterangan": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "authorUid": { "type": "string" }
+      },
+      "required": ["nip", "namaPegawai", "jabatan", "unitKerja", "tahun", "periode", "status", "authorUid"]
+    },
+    "PLTRecord": {
+      "title": "PLT Record",
+      "description": "Monitoring data for PLT (Pelaksana Tugas)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nip": { "type": "string" },
+        "namaPegawai": { "type": "string" },
+        "jabatanAsli": { "type": "string" },
+        "jabatanPlt": { "type": "string" },
+        "unitKerja": { "type": "string" },
+        "noSk": { "type": "string" },
+        "tmtMulai": { "type": "string" },
+        "tmtSelesai": { "type": "string" },
+        "status": { "type": "string", "enum": ["Aktif", "Selesai"] },
+        "authorUid": { "type": "string" }
+      },
+      "required": ["nip", "namaPegawai", "jabatanPlt", "unitKerja", "status", "authorUid"]
+    },
+    "PLHRecord": {
+      "title": "PLH Record",
+      "description": "Monitoring data for PLH (Pelaksana Harian)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nip": { "type": "string" },
+        "namaPegawai": { "type": "string" },
+        "jabatanAsli": { "type": "string" },
+        "jabatanPlh": { "type": "string" },
+        "unitKerja": { "type": "string" },
+        "noSk": { "type": "string" },
+        "tmtMulai": { "type": "string" },
+        "tmtSelesai": { "type": "string" },
+        "status": { "type": "string", "enum": ["Aktif", "Selesai"] },
+        "authorUid": { "type": "string" }
+      },
+      "required": ["nip", "namaPegawai", "jabatanPlh", "unitKerja", "status", "authorUid"]
+    }
+  },
+  "firestore": {
+    "/skp_records/{recordId}": {
+      "schema": "SKPRecord",
+      "description": "Collection of SKP monitoring records"
+    },
+    "/plt_records/{recordId}": {
+      "schema": "PLTRecord",
+      "description": "Collection of PLT monitoring records"
+    },
+    "/plh_records/{recordId}": {
+      "schema": "PLHRecord",
+      "description": "Collection of PLH monitoring records"
+    }
+  }
+}

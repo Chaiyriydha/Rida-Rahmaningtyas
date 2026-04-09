@@ -25,12 +25,34 @@ import {
   UploadCloud,
   X,
   UserCheck,
-  UserCog
+  UserCog,
+  LogOut,
+  LogIn,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
+import { 
+  collection, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  onSnapshot, 
+  query, 
+  orderBy,
+  serverTimestamp,
+  Timestamp
+} from 'firebase/firestore';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -66,11 +88,36 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 
-import { SKPRecord, SKPStatus, SKPPeriode, PLTRecord, PLHRecord } from './types';
+import { SKPRecord, SKPStatus, SKPPeriode, PLTRecord, PLHRecord, PLTStatus } from './types';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
 import { 
-  MOCK_SKP_DATA, 
-  MOCK_PLT_DATA,
-  MOCK_PLH_DATA,
   UNIT_KERJA_LIST, 
   PERIODE_LIST, 
   JENIS_DOKUMEN_LIST,
@@ -79,15 +126,32 @@ import {
   PREDIKAT_KINERJA_LIST
 } from './constants';
 import { cn } from '@/lib/utils';
+import { db, auth } from './lib/firebase';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer 
+} from 'recharts';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'skp' | 'plt-plh'>('skp');
-  const [records, setRecords] = useState<SKPRecord[]>(MOCK_SKP_DATA);
-  const [pltRecords, setPltRecords] = useState<PLTRecord[]>(MOCK_PLT_DATA);
-  const [plhRecords, setPlhRecords] = useState<PLHRecord[]>(MOCK_PLH_DATA);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [records, setRecords] = useState<SKPRecord[]>([]);
+  const [pltRecords, setPltRecords] = useState<PLTRecord[]>([]);
+  const [plhRecords, setPlhRecords] = useState<PLHRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilterPlt, setStatusFilterPlt] = useState<string>('all');
+  const [statusFilterPlh, setStatusFilterPlh] = useState<string>('all');
+  const [yearFilterPltPlh, setYearFilterPltPlh] = useState<string>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isAddPltPlhDialogOpen, setIsAddPltPlhDialogOpen] = useState(false);
   const [isTakeDialogOpen, setIsTakeDialogOpen] = useState(false);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -95,10 +159,93 @@ export default function App() {
   const [selectedRecord, setSelectedRecord] = useState<SKPRecord | null>(null);
   const [detailRecord, setDetailRecord] = useState<SKPRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<SKPRecord | null>(null);
+  const [editingPltRecord, setEditingPltRecord] = useState<PLTRecord | null>(null);
+  const [editingPlhRecord, setEditingPlhRecord] = useState<PLHRecord | null>(null);
+  const [isEditPltPlhDialogOpen, setIsEditPltPlhDialogOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'PLT' | 'PLH' } | null>(null);
   const [viewingFileUrl, setViewingFileUrl] = useState<string | null>(null);
   const [viewingFileName, setViewingFileName] = useState<string | null>(null);
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+
+  // Auth Effect
+  React.useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Firestore Real-time Sync
+  React.useEffect(() => {
+    if (!user) {
+      setRecords([]);
+      setPltRecords([]);
+      setPlhRecords([]);
+      return;
+    }
+
+    const qSkp = query(collection(db, 'skp_records'), orderBy('createdAt', 'desc'));
+    const unsubSkp = onSnapshot(qSkp, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as SKPRecord[];
+      setRecords(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'skp_records');
+    });
+
+    const qPlt = query(collection(db, 'plt_records'), orderBy('status', 'asc'));
+    const unsubPlt = onSnapshot(qPlt, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as PLTRecord[];
+      setPltRecords(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'plt_records');
+    });
+
+    const qPlh = query(collection(db, 'plh_records'), orderBy('status', 'asc'));
+    const unsubPlh = onSnapshot(qPlh, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as PLHRecord[];
+      setPlhRecords(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'plh_records');
+    });
+
+    return () => {
+      unsubSkp();
+      unsubPlt();
+      unsubPlh();
+    };
+  }, [user]);
+
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+      toast.success('Berhasil masuk');
+    } catch (error) {
+      console.error("Login Error:", error);
+      toast.error('Gagal masuk dengan Google');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      toast.success('Berhasil keluar');
+    } catch (error) {
+      console.error("Logout Error:", error);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -129,22 +276,64 @@ export default function App() {
   }, [pltRecords, plhRecords]);
 
   const filteredPltRecords = useMemo(() => {
-    return pltRecords.filter(record => 
-      record.namaPegawai.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.nip.includes(searchQuery) ||
-      record.jabatanPlt.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.unitKerja.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [pltRecords, searchQuery]);
+    return pltRecords.filter(record => {
+      const matchesSearch = 
+        record.namaPegawai.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        record.nip.includes(searchQuery) ||
+        record.jabatanPlt.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        record.unitKerja.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const recordYear = new Date(record.tglMulai).getFullYear().toString();
+      const matchesYear = yearFilterPltPlh === 'all' || recordYear === yearFilterPltPlh;
+      const matchesStatus = statusFilterPlt === 'all' || record.status === statusFilterPlt;
+      
+      return matchesSearch && matchesYear && matchesStatus;
+    });
+  }, [pltRecords, searchQuery, yearFilterPltPlh, statusFilterPlt]);
 
   const filteredPlhRecords = useMemo(() => {
-    return plhRecords.filter(record => 
-      record.namaPegawai.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.nip.includes(searchQuery) ||
-      record.jabatanPlh.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.unitKerja.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [plhRecords, searchQuery]);
+    return plhRecords.filter(record => {
+      const matchesSearch = 
+        record.namaPegawai.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        record.nip.includes(searchQuery) ||
+        record.jabatanPlh.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        record.unitKerja.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const recordYear = new Date(record.tglMulai).getFullYear().toString();
+      const matchesYear = yearFilterPltPlh === 'all' || recordYear === yearFilterPltPlh;
+      const matchesStatus = statusFilterPlh === 'all' || record.status === statusFilterPlh;
+      
+      return matchesSearch && matchesYear && matchesStatus;
+    });
+  }, [plhRecords, searchQuery, yearFilterPltPlh, statusFilterPlh]);
+
+  const chartDataPltPlh = useMemo(() => {
+    const years = new Set<number>();
+    const currentYear = new Date().getFullYear();
+    
+    // Get unique years from both records
+    pltRecords.forEach(r => years.add(new Date(r.tglMulai).getFullYear()));
+    plhRecords.forEach(r => years.add(new Date(r.tglMulai).getFullYear()));
+    
+    // Ensure at least the last 3 years are shown if no data
+    if (years.size === 0) {
+      years.add(currentYear);
+      years.add(currentYear - 1);
+      years.add(currentYear - 2);
+    }
+
+    const sortedYears = Array.from(years).sort((a, b) => a - b);
+    
+    return sortedYears.map(year => {
+      const pltCount = pltRecords.filter(r => new Date(r.tglMulai).getFullYear() === year).length;
+      const plhCount = plhRecords.filter(r => new Date(r.tglMulai).getFullYear() === year).length;
+      return {
+        year: year.toString(),
+        PLT: pltCount,
+        PLH: plhCount
+      };
+    });
+  }, [pltRecords, plhRecords]);
 
   const getShortDocName = (name: string) => {
     const map: Record<string, string> = {
@@ -166,8 +355,10 @@ export default function App() {
     return matchesSearch && matchesStatus;
   });
 
-  const handleAddRecord = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddRecord = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!user) return;
+
     const formData = new FormData(e.currentTarget);
     const selectedJenisDokumen = JENIS_DOKUMEN_LIST.filter(item => formData.get(`jenisDokumen-${item}`) === 'on');
     
@@ -177,37 +368,78 @@ export default function App() {
     let fileUrl = '';
     let fileName = '';
     
+    // Note: In a real app, we would upload to Firebase Storage here.
+    // For now, we'll use object URLs as placeholders or just store the metadata.
     if (file) {
       fileUrl = URL.createObjectURL(file);
       fileName = file.name;
     }
 
-    const newRecord: SKPRecord = {
-      id: Math.random().toString(36).substr(2, 9),
-      nip: formData.get('nip') as string,
-      namaPegawai: formData.get('namaPegawai') as string,
-      jabatan: formData.get('jabatan') as string,
-      unitKerja: formData.get('unitKerja') as string,
-      tahun: parseInt(formData.get('tahun') as string),
-      periode: formData.get('periode') as SKPPeriode,
-      jenisDokumen: selectedJenisDokumen,
-      status: 'Belum Diambil',
-      ratingHasilKerja: formData.get('ratingHasilKerja') as string,
-      ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
-      predikatKinerja: formData.get('predikatKinerja') as string,
-      fileUrl,
-      fileName,
-    };
-    setRecords([newRecord, ...records]);
-    setIsAddDialogOpen(false);
-    setUploadPreview(null);
-    setUploadFileName(null);
-    toast.success('Data SKP berhasil ditambahkan');
+    try {
+      const newRecord = {
+        nip: formData.get('nip') as string,
+        namaPegawai: formData.get('namaPegawai') as string,
+        jabatan: formData.get('jabatan') as string,
+        unitKerja: formData.get('unitKerja') as string,
+        tahun: parseInt(formData.get('tahun') as string),
+        periode: formData.get('periode') as SKPPeriode,
+        jenisDokumen: selectedJenisDokumen,
+        status: 'Belum Diambil' as SKPStatus,
+        ratingHasilKerja: formData.get('ratingHasilKerja') as string,
+        ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
+        predikatKinerja: formData.get('predikatKinerja') as string,
+        fileUrl,
+        fileName,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'skp_records'), newRecord);
+      setIsAddDialogOpen(false);
+      setUploadPreview(null);
+      setUploadFileName(null);
+      toast.success('Data SKP berhasil disimpan ke database');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'skp_records');
+    }
   };
 
-  const handleUpdateRecord = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddPltPlhRecord = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!editingRecord) return;
+    if (!user) return;
+
+    const formData = new FormData(e.currentTarget);
+    const type = formData.get('type') as 'PLT' | 'PLH';
+    const collectionName = type === 'PLT' ? 'plt_records' : 'plh_records';
+
+    try {
+      const newRecord = {
+        nip: formData.get('nip') as string,
+        namaPegawai: formData.get('namaPegawai') as string,
+        jabatanAsli: formData.get('jabatanAsli') as string,
+        [type === 'PLT' ? 'jabatanPlt' : 'jabatanPlh']: formData.get('jabatanTugas') as string,
+        unitKerja: formData.get('unitKerja') as string,
+        noSk: formData.get('noSk') as string,
+        tglMulai: formData.get('tglMulai') as string,
+        tglSelesai: formData.get('tglSelesai') as string,
+        status: 'Aktif' as PLTStatus,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, collectionName), newRecord);
+      setIsAddPltPlhDialogOpen(false);
+      toast.success(`Data ${type} berhasil disimpan`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, collectionName);
+    }
+  };
+
+  const handleUpdateRecord = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingRecord || !user) return;
 
     const formData = new FormData(e.currentTarget);
     const selectedJenisDokumen = JENIS_DOKUMEN_LIST.filter(item => formData.get(`jenisDokumen-${item}`) === 'on');
@@ -223,54 +455,145 @@ export default function App() {
       fileName = file.name;
     }
 
-    const updatedRecord: SKPRecord = {
-      ...editingRecord,
-      nip: formData.get('nip') as string,
-      namaPegawai: formData.get('namaPegawai') as string,
-      jabatan: formData.get('jabatan') as string,
-      unitKerja: formData.get('unitKerja') as string,
-      tahun: parseInt(formData.get('tahun') as string),
-      periode: formData.get('periode') as SKPPeriode,
-      jenisDokumen: selectedJenisDokumen,
-      ratingHasilKerja: formData.get('ratingHasilKerja') as string,
-      ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
-      predikatKinerja: formData.get('predikatKinerja') as string,
-      fileUrl,
-      fileName,
-    };
+    try {
+      const updatedData = {
+        nip: formData.get('nip') as string,
+        namaPegawai: formData.get('namaPegawai') as string,
+        jabatan: formData.get('jabatan') as string,
+        unitKerja: formData.get('unitKerja') as string,
+        tahun: parseInt(formData.get('tahun') as string),
+        periode: formData.get('periode') as SKPPeriode,
+        jenisDokumen: selectedJenisDokumen,
+        ratingHasilKerja: formData.get('ratingHasilKerja') as string,
+        ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
+        predikatKinerja: formData.get('predikatKinerja') as string,
+        fileUrl,
+        fileName,
+        updatedAt: serverTimestamp(),
+      };
 
-    setRecords(records.map(r => r.id === editingRecord.id ? updatedRecord : r));
-    setIsEditDialogOpen(false);
-    setEditingRecord(null);
-    setUploadPreview(null);
-    setUploadFileName(null);
-    toast.success('Data SKP berhasil diperbarui');
+      await updateDoc(doc(db, 'skp_records', editingRecord.id), updatedData);
+      setIsEditDialogOpen(false);
+      setEditingRecord(null);
+      setUploadPreview(null);
+      setUploadFileName(null);
+      toast.success('Data SKP berhasil diperbarui');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `skp_records/${editingRecord.id}`);
+    }
   };
 
-  const handleTakeSKP = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUpdatePltPlhRecord = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!selectedRecord) return;
+    if (!user) return;
+    
+    const editingData = editingPltRecord || editingPlhRecord;
+    if (!editingData) return;
+
+    const formData = new FormData(e.currentTarget);
+    const type = formData.get('type') as 'PLT' | 'PLH';
+    const collectionName = type === 'PLT' ? 'plt_records' : 'plh_records';
+
+    try {
+      const updatedData = {
+        nip: formData.get('nip') as string,
+        namaPegawai: formData.get('namaPegawai') as string,
+        jabatanAsli: formData.get('jabatanAsli') as string,
+        [type === 'PLT' ? 'jabatanPlt' : 'jabatanPlh']: formData.get('jabatanTugas') as string,
+        unitKerja: formData.get('unitKerja') as string,
+        noSk: formData.get('noSk') as string,
+        tglMulai: formData.get('tglMulai') as string,
+        tglSelesai: formData.get('tglSelesai') as string,
+        status: formData.get('status') as PLTStatus,
+        updatedAt: serverTimestamp(),
+      };
+
+      await updateDoc(doc(db, collectionName, editingData.id), updatedData);
+      setIsEditPltPlhDialogOpen(false);
+      setEditingPltRecord(null);
+      setEditingPlhRecord(null);
+      toast.success(`Data ${type} berhasil diperbarui`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${collectionName}/${editingData.id}`);
+    }
+  };
+
+  const handleTakeSKP = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedRecord || !user) return;
 
     const formData = new FormData(e.currentTarget);
     const tanggalAmbilInput = formData.get('tanggalAmbil') as string;
     
-    const updatedRecords = records.map(r => {
-      if (r.id === selectedRecord.id) {
-        return {
-          ...r,
-          status: 'Sudah Diambil' as SKPStatus,
-          pengambil: formData.get('pengambil') as string,
-          unitKerjaPengambil: formData.get('unitKerjaPengambil') as string,
-          tanggalAmbil: new Date(tanggalAmbilInput).toISOString(),
-        };
-      }
-      return r;
-    });
+    try {
+      const updatedData = {
+        status: 'Sudah Diambil' as SKPStatus,
+        pengambil: formData.get('pengambil') as string,
+        unitKerjaPengambil: formData.get('unitKerjaPengambil') as string,
+        tanggalAmbil: new Date(tanggalAmbilInput).toISOString(),
+        updatedAt: serverTimestamp(),
+      };
 
-    setRecords(updatedRecords);
-    setIsTakeDialogOpen(false);
-    setSelectedRecord(null);
-    toast.success('Status berkas berhasil diperbarui');
+      await updateDoc(doc(db, 'skp_records', selectedRecord.id), updatedData);
+      setIsTakeDialogOpen(false);
+      setSelectedRecord(null);
+      toast.success('Status berkas berhasil diperbarui');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `skp_records/${selectedRecord.id}`);
+    }
+  };
+
+  const handleDeleteRecord = (id: string) => {
+    setDeletingInfo({ id, type: 'SKP' });
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const handleDeletePltPlhRecord = (id: string, type: 'PLT' | 'PLH') => {
+    setDeletingInfo({ id, type });
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+    const errInfo: FirestoreErrorInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        emailVerified: auth.currentUser?.emailVerified,
+        isAnonymous: auth.currentUser?.isAnonymous,
+        tenantId: auth.currentUser?.tenantId,
+        providerInfo: auth.currentUser?.providerData.map(provider => ({
+          providerId: provider.providerId,
+          displayName: provider.displayName,
+          email: provider.email,
+          photoUrl: provider.photoURL
+        })) || []
+      },
+      operationType,
+      path
+    }
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    // Check if it's a permission error
+    if (errInfo.error.toLowerCase().includes('permission') || errInfo.error.toLowerCase().includes('insufficient')) {
+      toast.error("Akses ditolak: Anda tidak memiliki izin untuk melakukan tindakan ini.");
+    }
+    throw new Error(JSON.stringify(errInfo));
+  };
+
+  const confirmDelete = async () => {
+    if (!deletingInfo) return;
+    const { id, type } = deletingInfo;
+    const collectionName = type === 'SKP' ? 'skp_records' : (type === 'PLT' ? 'plt_records' : 'plh_records');
+    
+    try {
+      await deleteDoc(doc(db, collectionName, id));
+      toast.success(`Data ${type === 'SKP' ? '' : type} berhasil dihapus`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${id}`);
+    } finally {
+      setIsDeleteConfirmOpen(false);
+      setDeletingInfo(null);
+    }
   };
 
   const handleExport = () => {
@@ -313,113 +636,527 @@ export default function App() {
     toast.success('Data SKP berhasil diekspor ke Excel');
   };
 
+  const handleExportPltPlh = () => {
+    if (pltRecords.length === 0 && plhRecords.length === 0) {
+      toast.error('Tidak ada data PLT/PLH untuk diekspor');
+      return;
+    }
+
+    const workbook = XLSX.utils.book_new();
+
+    if (pltRecords.length > 0) {
+      const pltData = pltRecords.map(record => ({
+        'Nama Pegawai': record.namaPegawai,
+        'NIP': record.nip,
+        'Jabatan Asli': record.jabatanAsli,
+        'Jabatan PLT': record.jabatanPlt,
+        'Unit Kerja': record.unitKerja,
+        'Nomor SK': record.noSk,
+        'Tanggal Mulai': format(new Date(record.tglMulai), 'dd MMMM yyyy', { locale: id }),
+        'Tanggal Selesai': format(new Date(record.tglSelesai), 'dd MMMM yyyy', { locale: id }),
+        'Status': record.status
+      }));
+      const pltSheet = XLSX.utils.json_to_sheet(pltData);
+      XLSX.utils.book_append_sheet(workbook, pltSheet, 'Data PLT');
+      
+      // Auto-size columns for PLT
+      const pltWidths = Object.keys(pltData[0]).map(key => ({
+        wch: Math.max(key.length, ...pltData.map(row => String(row[key as keyof typeof row]).length)) + 2
+      }));
+      pltSheet['!cols'] = pltWidths;
+    }
+
+    if (plhRecords.length > 0) {
+      const plhData = plhRecords.map(record => ({
+        'Nama Pegawai': record.namaPegawai,
+        'NIP': record.nip,
+        'Jabatan Asli': record.jabatanAsli,
+        'Jabatan PLH': record.jabatanPlh,
+        'Unit Kerja': record.unitKerja,
+        'Nomor SK': record.noSk,
+        'Tanggal Mulai': format(new Date(record.tglMulai), 'dd MMMM yyyy', { locale: id }),
+        'Tanggal Selesai': format(new Date(record.tglSelesai), 'dd MMMM yyyy', { locale: id }),
+        'Status': record.status
+      }));
+      const plhSheet = XLSX.utils.json_to_sheet(plhData);
+      XLSX.utils.book_append_sheet(workbook, plhSheet, 'Data PLH');
+
+      // Auto-size columns for PLH
+      const plhWidths = Object.keys(plhData[0]).map(key => ({
+        wch: Math.max(key.length, ...plhData.map(row => String(row[key as keyof typeof row]).length)) + 2
+      }));
+      plhSheet['!cols'] = plhWidths;
+    }
+
+    XLSX.writeFile(workbook, `Data_PLT_PLH_Export_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
+    toast.success('Data PLT & PLH berhasil diekspor ke Excel');
+  };
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans selection:bg-primary/20">
+    <div className="flex min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans selection:bg-primary/20">
       <Toaster position="top-right" />
       
-      {/* Sidebar / Header */}
-      <header className="sticky top-0 z-40 w-full border-b bg-white/80 backdrop-blur-md">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
+      {/* Sidebar */}
+      <aside className="hidden md:flex w-64 flex-col border-r bg-white sticky top-0 h-screen">
+        <div className="p-6 flex flex-col gap-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-auto items-center justify-center overflow-hidden">
-              <img 
-                src="https://bskji.kemenperin.go.id/logo.png" 
-                alt="Logo BSKJI" 
-                className="h-full w-auto object-contain"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  // Fallback if image fails to load
-                  e.currentTarget.style.display = 'none';
-                  e.currentTarget.parentElement!.innerHTML = `
-                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-                      <span class="font-bold text-lg">B</span>
-                    </div>
-                  `;
-                }}
-              />
+            <div className="flex h-14 w-auto items-center justify-center border-r pr-3 border-muted-foreground/20">
+              <span className="text-4xl font-black tracking-tighter text-[#1A4A9A]">BSKJI</span>
             </div>
-            <div className="hidden sm:block">
-              <h1 className="text-lg font-bold tracking-tight text-primary">Monitoring SKP Pegawai</h1>
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider leading-none">Badan Standardisasi dan Kebijakan Jasa Industri</p>
+            <div className="flex flex-col justify-center">
+              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Badan</p>
+              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Standardisasi dan</p>
+              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Kebijakan</p>
+              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Jasa Industri</p>
             </div>
           </div>
 
-          <nav className="hidden md:flex items-center gap-1 bg-muted/30 p-1 rounded-lg">
+          <nav className="flex flex-col gap-2">
             <Button 
               variant={activeTab === 'skp' ? 'default' : 'ghost'} 
-              size="sm" 
-              className={cn("h-8 gap-2 px-4 rounded-md transition-all", activeTab === 'skp' ? "shadow-sm" : "text-muted-foreground")}
+              className={cn(
+                "justify-start gap-3 h-10 px-4 transition-all", 
+                activeTab === 'skp' ? "shadow-sm" : "text-muted-foreground"
+              )}
               onClick={() => setActiveTab('skp')}
             >
               <FileText className="h-4 w-4" />
-              SKP
+              SKP Pegawai
             </Button>
             <Button 
               variant={activeTab === 'plt-plh' ? 'default' : 'ghost'} 
-              size="sm" 
-              className={cn("h-8 gap-2 px-4 rounded-md transition-all", activeTab === 'plt-plh' ? "shadow-sm" : "text-muted-foreground")}
+              className={cn(
+                "justify-start gap-3 h-10 px-4 transition-all", 
+                activeTab === 'plt-plh' ? "shadow-sm" : "text-muted-foreground"
+              )}
               onClick={() => setActiveTab('plt-plh')}
             >
               <LayoutDashboard className="h-4 w-4" />
               PLT & PLH
             </Button>
           </nav>
+        </div>
 
-          <div className="flex items-center gap-4">
-            {activeTab === 'skp' && (
-              <>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="hidden sm:flex gap-2"
-                  onClick={handleExport}
-                >
-                  <Download className="h-4 w-4" />
-                  Export Data
-                </Button>
-                <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
-                  setIsAddDialogOpen(open);
-                  if (!open) {
-                    if (uploadPreview) URL.revokeObjectURL(uploadPreview);
-                    setUploadPreview(null);
-                    setUploadFileName(null);
-                  }
-                }}>
-                  <DialogTrigger 
-                    nativeButton={true}
-                    render={<Button size="sm" className="gap-2 shadow-md hover:shadow-lg transition-all" />}
+        <div className="mt-auto p-6 border-t">
+          {user && (
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <User className="h-4 w-4 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold truncate">{user.displayName}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{user.email}</p>
+              </div>
+            </div>
+          )}
+          {user ? (
+            <Button variant="outline" className="w-full justify-start gap-2 text-xs h-9" onClick={handleLogout}>
+              <LogOut className="h-3.5 w-3.5" />
+              Keluar
+            </Button>
+          ) : (
+            <Button className="w-full justify-start gap-2 text-xs h-9" onClick={handleLogin}>
+              <LogIn className="h-3.5 w-3.5" />
+              Masuk
+            </Button>
+          )}
+        </div>
+      </aside>
+
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <header className="sticky top-0 z-40 w-full border-b bg-white/80 backdrop-blur-md h-16 flex items-center shrink-0">
+          <div className="container mx-auto flex items-center justify-between px-4 md:px-8">
+            <div className="md:hidden flex items-center gap-2">
+              <span className="text-2xl font-black tracking-tighter text-[#1A4A9A]">BSKJI</span>
+              <div className="h-6 w-[1px] bg-muted-foreground/20 mx-1" />
+              <div className="flex flex-col">
+                <p className="text-[7px] font-bold text-[#1A4A9A] leading-none uppercase">Badan Standardisasi dan</p>
+                <p className="text-[7px] font-bold text-[#1A4A9A] leading-none uppercase">Kebijakan Jasa Industri</p>
+              </div>
+            </div>
+
+            <div className="hidden md:block">
+              <h2 className="text-sm font-semibold text-muted-foreground">
+                {activeTab === 'skp' ? 'Monitoring SKP Pegawai' : 'Monitoring PLT & PLH'}
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {user && activeTab === 'skp' && (
+                <>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="hidden sm:flex gap-2 h-9"
+                    onClick={handleExport}
                   >
-                    <Plus className="h-4 w-4" />
-                    Tambah SKP
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
-                    <form onSubmit={handleAddRecord}>
+                    <Download className="h-4 w-4" />
+                    Export Excel
+                  </Button>
+                  <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+                    setIsAddDialogOpen(open);
+                    if (!open) {
+                      if (uploadPreview) URL.revokeObjectURL(uploadPreview);
+                      setUploadPreview(null);
+                      setUploadFileName(null);
+                    }
+                  }}>
+                    <DialogTrigger 
+                      nativeButton={true}
+                      render={<Button size="sm" className="gap-2 h-9 shadow-sm" />}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Tambah Data
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+                      {isAddDialogOpen && (
+                        <form onSubmit={handleAddRecord}>
+                          <DialogHeader>
+                            <DialogTitle>Tambah Data SKP Baru</DialogTitle>
+                            <DialogDescription>
+                              Masukkan informasi pegawai untuk monitoring berkas SKP.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="grid gap-4 py-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label htmlFor="namaPegawai">Nama Lengkap</Label>
+                                <Input id="namaPegawai" name="namaPegawai" placeholder="Contoh: Ahmad Subarjo" required />
+                              </div>
+                              <div className="grid gap-2">
+                                <Label htmlFor="nip">NIP</Label>
+                                <Input id="nip" name="nip" placeholder="18 digit NIP" required />
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label htmlFor="jabatan">Jabatan</Label>
+                                <Input id="jabatan" name="jabatan" placeholder="Contoh: Analis Kepegawaian" required />
+                              </div>
+                              <div className="grid gap-2">
+                                <Label htmlFor="unitKerja">Unit Kerja</Label>
+                                <Select name="unitKerja" required>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Unit Kerja" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {UNIT_KERJA_LIST.map(unit => (
+                                      <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label htmlFor="tahun">Tahun SKP</Label>
+                                <Input id="tahun" name="tahun" type="number" defaultValue={new Date().getFullYear()} required />
+                              </div>
+                              <div className="grid gap-2">
+                                <Label htmlFor="periode">Periode SKP</Label>
+                                <Select name="periode" defaultValue="Tahunan" required>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Periode" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PERIODE_LIST.map(periode => (
+                                      <SelectItem key={periode} value={periode}>{periode}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="grid gap-3">
+                              <Label>Jenis Dokumen</Label>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border rounded-lg p-3 bg-muted/20">
+                                {JENIS_DOKUMEN_LIST.map((item) => (
+                                  <div key={item} className="flex items-center space-x-2">
+                                    <Checkbox id={`jenisDokumen-${item}`} name={`jenisDokumen-${item}`} />
+                                    <label
+                                      htmlFor={`jenisDokumen-${item}`}
+                                      className="text-[11px] font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                                    >
+                                      {item}
+                                    </label>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label htmlFor="ratingHasilKerja">Rating Hasil Kerja</Label>
+                                <Select name="ratingHasilKerja">
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Rating" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {RATING_HASIL_KERJA_LIST.map(rating => (
+                                      <SelectItem key={rating} value={rating}>{rating}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="grid gap-2">
+                                <Label htmlFor="ratingHasilPerilaku">Rating Hasil Perilaku</Label>
+                                <Select name="ratingHasilPerilaku">
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Rating" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {RATING_PERILAKU_LIST.map(rating => (
+                                      <SelectItem key={rating} value={rating}>{rating}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="grid gap-2">
+                              <Label htmlFor="predikatKinerja">Predikat Kinerja</Label>
+                              <Select name="predikatKinerja">
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Pilih Predikat" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PREDIKAT_KINERJA_LIST.map(predikat => (
+                                    <SelectItem key={predikat} value={predikat}>{predikat}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="grid gap-2">
+                              <Label htmlFor="file">Upload Berkas SKP (PDF/Gambar)</Label>
+                              <div className="flex flex-col gap-3">
+                                <div className="flex items-center justify-center w-full">
+                                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-lg cursor-pointer bg-muted/50 hover:bg-muted transition-colors border-muted-foreground/25">
+                                    <div className="flex flex-col items-center justify-center pt-2 pb-3">
+                                      <UploadCloud className="w-6 h-6 mb-2 text-muted-foreground" />
+                                      <p className="text-xs text-muted-foreground">
+                                        <span className="font-semibold">Klik untuk upload</span> atau drag and drop
+                                      </p>
+                                    </div>
+                                    <input 
+                                      id="file" 
+                                      name="file" 
+                                      type="file" 
+                                      className="hidden" 
+                                      accept=".pdf,image/*" 
+                                      onChange={handleFileChange}
+                                    />
+                                  </label>
+                                </div>
+                                
+                                {uploadPreview && (
+                                  <div className="p-3 rounded-lg border bg-muted/30 flex items-center gap-3">
+                                    <div className="h-12 w-12 rounded border bg-background flex items-center justify-center overflow-hidden shrink-0">
+                                      {uploadFileName?.toLowerCase().endsWith('.pdf') ? (
+                                        <FileText className="h-6 w-6 text-red-500" />
+                                      ) : (
+                                        <img 
+                                          src={uploadPreview} 
+                                          alt="Preview" 
+                                          className="h-full w-full object-cover"
+                                          referrerPolicy="no-referrer"
+                                        />
+                                      )}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-medium truncate">{uploadFileName}</p>
+                                      <p className="text-[10px] text-muted-foreground uppercase">Siap untuk disimpan</p>
+                                    </div>
+                                    <Button 
+                                      type="button" 
+                                      variant="ghost" 
+                                      size="icon-xs" 
+                                      className="text-muted-foreground hover:text-destructive"
+                                      onClick={() => {
+                                        if (uploadPreview) URL.revokeObjectURL(uploadPreview);
+                                        setUploadPreview(null);
+                                        setUploadFileName(null);
+                                        // Reset file input
+                                        const fileInput = document.getElementById('file') as HTMLInputElement;
+                                        if (fileInput) fileInput.value = '';
+                                      }}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
+                            <DialogClose 
+                              nativeButton={true}
+                              render={<Button type="button" variant="outline">Batal</Button>} 
+                            />
+                            <Button type="submit" className="bg-primary hover:bg-primary/90">
+                              Simpan Data SKP
+                            </Button>
+                          </DialogFooter>
+                      </form>
+                    )}
+                  </DialogContent>
+                </Dialog>
+              </>
+            )}
+
+              {user && activeTab === 'plt-plh' && (
+                <>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="hidden sm:flex gap-2 h-9"
+                    onClick={handleExportPltPlh}
+                  >
+                    <Download className="h-4 w-4" />
+                    Export Excel
+                  </Button>
+                  <Dialog open={isAddPltPlhDialogOpen} onOpenChange={setIsAddPltPlhDialogOpen}>
+                    <DialogTrigger 
+                      nativeButton={true}
+                      render={<Button size="sm" className="gap-2 h-9 shadow-sm" />}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Tambah PLT/PLH
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+                      {isAddPltPlhDialogOpen && (
+                        <form onSubmit={handleAddPltPlhRecord}>
+                        <DialogHeader>
+                          <DialogTitle>Tambah Data PLT / PLH Baru</DialogTitle>
+                          <DialogDescription>
+                            Masukkan informasi penugasan PLT atau PLH pegawai.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="grid gap-2">
+                            <Label>Jenis Penugasan</Label>
+                            <Select name="type" defaultValue="PLT" required>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Pilih Jenis" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="PLT">PLT (Pelaksana Tugas)</SelectItem>
+                                <SelectItem value="PLH">PLH (Pelaksana Harian)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label htmlFor="namaPegawai">Nama Lengkap</Label>
+                              <Input id="namaPegawai" name="namaPegawai" placeholder="Nama lengkap pegawai" required />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="nip">NIP</Label>
+                              <Input id="nip" name="nip" placeholder="NIP pegawai" required />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label htmlFor="jabatanAsli">Jabatan Asli</Label>
+                              <Input id="jabatanAsli" name="jabatanAsli" placeholder="Jabatan definitif" required />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="jabatanTugas">Penugasan</Label>
+                              <Input id="jabatanTugas" name="jabatanTugas" placeholder="Jabatan penugasan" required />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label htmlFor="unitKerja">Unit Kerja</Label>
+                              <Select name="unitKerja" required>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Pilih Unit Kerja" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {UNIT_KERJA_LIST.map(unit => (
+                                    <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="noSk">Nomor SK</Label>
+                              <Input id="noSk" name="noSk" placeholder="Nomor Surat Keputusan" required />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label htmlFor="tglMulai">Tanggal Mulai</Label>
+                              <Input id="tglMulai" name="tglMulai" type="date" required />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="tglSelesai">Tanggal Selesai</Label>
+                              <Input id="tglSelesai" name="tglSelesai" type="date" required />
+                            </div>
+                          </div>
+                        </div>
+                        <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
+                          <DialogClose 
+                            nativeButton={true}
+                            render={<Button type="button" variant="outline">Batal</Button>} 
+                          />
+                          <Button type="submit" className="bg-primary hover:bg-primary/90">
+                            Simpan Data Penugasan
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    )}
+                  </DialogContent>
+                </Dialog>
+              </>
+            )}
+              
+              {/* Edit SKP Dialog */}
+              <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+                setIsEditDialogOpen(open);
+                if (!open) {
+                  setEditingRecord(null);
+                  if (uploadPreview) URL.revokeObjectURL(uploadPreview);
+                  setUploadPreview(null);
+                  setUploadFileName(null);
+                }
+              }}>
+                <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+                  {isEditDialogOpen && editingRecord && (
+                    <form onSubmit={handleUpdateRecord}>
                       <DialogHeader>
-                        <DialogTitle>Tambah Data SKP Baru</DialogTitle>
+                        <DialogTitle>Edit Data SKP</DialogTitle>
                         <DialogDescription>
-                          Masukkan informasi pegawai untuk monitoring berkas SKP.
+                          Perbarui informasi pegawai jika terjadi mutasi atau perubahan data lainnya.
                         </DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-4 py-4">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="namaPegawai">Nama Lengkap</Label>
-                            <Input id="namaPegawai" name="namaPegawai" placeholder="Contoh: Ahmad Subarjo" required />
+                            <Label htmlFor="edit-namaPegawai">Nama Lengkap</Label>
+                            <Input id="edit-namaPegawai" name="namaPegawai" defaultValue={editingRecord.namaPegawai} required />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="nip">NIP</Label>
-                            <Input id="nip" name="nip" placeholder="18 digit NIP" required />
+                            <Label htmlFor="edit-nip">NIP</Label>
+                            <Input id="edit-nip" name="nip" defaultValue={editingRecord.nip} required />
                           </div>
                         </div>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="jabatan">Jabatan</Label>
-                            <Input id="jabatan" name="jabatan" placeholder="Contoh: Analis Kepegawaian" required />
+                            <Label htmlFor="edit-jabatan">Jabatan</Label>
+                            <Input id="edit-jabatan" name="jabatan" defaultValue={editingRecord.jabatan} required />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="unitKerja">Unit Kerja</Label>
-                            <Select name="unitKerja" required>
+                            <Label htmlFor="edit-unitKerja">Unit Kerja</Label>
+                            <Select name="unitKerja" defaultValue={editingRecord.unitKerja} required>
                               <SelectTrigger>
                                 <SelectValue placeholder="Pilih Unit Kerja" />
                               </SelectTrigger>
@@ -434,12 +1171,12 @@ export default function App() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="tahun">Tahun SKP</Label>
-                            <Input id="tahun" name="tahun" type="number" defaultValue={new Date().getFullYear()} required />
+                            <Label htmlFor="edit-tahun">Tahun SKP</Label>
+                            <Input id="edit-tahun" name="tahun" type="number" defaultValue={editingRecord.tahun} required />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="periode">Periode SKP</Label>
-                            <Select name="periode" defaultValue="Tahunan" required>
+                            <Label htmlFor="edit-periode">Periode SKP</Label>
+                            <Select name="periode" defaultValue={editingRecord.periode} required>
                               <SelectTrigger>
                                 <SelectValue placeholder="Pilih Periode" />
                               </SelectTrigger>
@@ -457,9 +1194,13 @@ export default function App() {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border rounded-lg p-3 bg-muted/20">
                             {JENIS_DOKUMEN_LIST.map((item) => (
                               <div key={item} className="flex items-center space-x-2">
-                                <Checkbox id={`jenisDokumen-${item}`} name={`jenisDokumen-${item}`} />
+                                <Checkbox 
+                                  id={`edit-jenisDokumen-${item}`} 
+                                  name={`jenisDokumen-${item}`} 
+                                  defaultChecked={editingRecord.jenisDokumen.includes(item)}
+                                />
                                 <label
-                                  htmlFor={`jenisDokumen-${item}`}
+                                  htmlFor={`edit-jenisDokumen-${item}`}
                                   className="text-[11px] font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
                                 >
                                   {item}
@@ -471,8 +1212,8 @@ export default function App() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="ratingHasilKerja">Rating Hasil Kerja</Label>
-                            <Select name="ratingHasilKerja">
+                            <Label htmlFor="edit-ratingHasilKerja">Rating Hasil Kerja</Label>
+                            <Select name="ratingHasilKerja" defaultValue={editingRecord.ratingHasilKerja}>
                               <SelectTrigger>
                                 <SelectValue placeholder="Pilih Rating" />
                               </SelectTrigger>
@@ -484,8 +1225,8 @@ export default function App() {
                             </Select>
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="ratingHasilPerilaku">Rating Hasil Perilaku</Label>
-                            <Select name="ratingHasilPerilaku">
+                            <Label htmlFor="edit-ratingHasilPerilaku">Rating Hasil Perilaku</Label>
+                            <Select name="ratingHasilPerilaku" defaultValue={editingRecord.ratingHasilPerilaku}>
                               <SelectTrigger>
                                 <SelectValue placeholder="Pilih Rating" />
                               </SelectTrigger>
@@ -499,8 +1240,8 @@ export default function App() {
                         </div>
 
                         <div className="grid gap-2">
-                          <Label htmlFor="predikatKinerja">Predikat Kinerja</Label>
-                          <Select name="predikatKinerja">
+                          <Label htmlFor="edit-predikatKinerja">Predikat Kinerja</Label>
+                          <Select name="predikatKinerja" defaultValue={editingRecord.predikatKinerja}>
                             <SelectTrigger>
                               <SelectValue placeholder="Pilih Predikat" />
                             </SelectTrigger>
@@ -513,18 +1254,18 @@ export default function App() {
                         </div>
 
                         <div className="grid gap-2">
-                          <Label htmlFor="file">Upload Berkas SKP (PDF/Gambar)</Label>
+                          <Label htmlFor="edit-file">Ganti Berkas SKP (Opsional)</Label>
                           <div className="flex flex-col gap-3">
                             <div className="flex items-center justify-center w-full">
                               <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-lg cursor-pointer bg-muted/50 hover:bg-muted transition-colors border-muted-foreground/25">
                                 <div className="flex flex-col items-center justify-center pt-2 pb-3">
                                   <UploadCloud className="w-6 h-6 mb-2 text-muted-foreground" />
                                   <p className="text-xs text-muted-foreground">
-                                    <span className="font-semibold">Klik untuk upload</span> atau drag and drop
+                                    <span className="font-semibold">Klik untuk ganti berkas</span> atau drag and drop
                                   </p>
                                 </div>
                                 <input 
-                                  id="file" 
+                                  id="edit-file" 
                                   name="file" 
                                   type="file" 
                                   className="hidden" 
@@ -534,7 +1275,7 @@ export default function App() {
                               </label>
                             </div>
                             
-                            {uploadPreview && (
+                            {uploadPreview ? (
                               <div className="p-3 rounded-lg border bg-muted/30 flex items-center gap-3">
                                 <div className="h-12 w-12 rounded border bg-background flex items-center justify-center overflow-hidden shrink-0">
                                   {uploadFileName?.toLowerCase().endsWith('.pdf') ? (
@@ -550,7 +1291,7 @@ export default function App() {
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs font-medium truncate">{uploadFileName}</p>
-                                  <p className="text-[10px] text-muted-foreground uppercase">Siap untuk disimpan</p>
+                                  <p className="text-[10px] text-muted-foreground uppercase">Berkas Baru Terpilih</p>
                                 </div>
                                 <Button 
                                   type="button" 
@@ -561,13 +1302,22 @@ export default function App() {
                                     if (uploadPreview) URL.revokeObjectURL(uploadPreview);
                                     setUploadPreview(null);
                                     setUploadFileName(null);
-                                    // Reset file input
-                                    const fileInput = document.getElementById('file') as HTMLInputElement;
+                                    const fileInput = document.getElementById('edit-file') as HTMLInputElement;
                                     if (fileInput) fileInput.value = '';
                                   }}
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
+                              </div>
+                            ) : editingRecord.fileName && (
+                              <div className="p-3 rounded-lg border bg-muted/10 flex items-center gap-3">
+                                <div className="h-10 w-10 rounded border bg-background flex items-center justify-center shrink-0">
+                                  <FileText className="h-5 w-5 text-muted-foreground" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium truncate">{editingRecord.fileName}</p>
+                                  <p className="text-[10px] text-muted-foreground uppercase">Berkas Saat Ini</p>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -579,248 +1329,18 @@ export default function App() {
                           render={<Button type="button" variant="outline">Batal</Button>} 
                         />
                         <Button type="submit" className="bg-primary hover:bg-primary/90">
-                          Simpan Data SKP
+                          Simpan Perubahan
                         </Button>
                       </DialogFooter>
                     </form>
-                  </DialogContent>
-                </Dialog>
-              </>
-            )}
-            {activeTab === 'plt-plh' && (
-              <Button 
-                size="sm" 
-                className="gap-2 shadow-md hover:shadow-lg transition-all"
-                onClick={() => toast.info('Fitur Tambah PLT/PLH akan segera hadir')}
-              >
-                <Plus className="h-4 w-4" />
-                Tambah PLT/PLH
-              </Button>
-            )}
-
-            {/* Edit SKP Dialog */}
-            <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
-              setIsEditDialogOpen(open);
-              if (!open) {
-                setEditingRecord(null);
-                if (uploadPreview) URL.revokeObjectURL(uploadPreview);
-                setUploadPreview(null);
-                setUploadFileName(null);
-              }
-            }}>
-              <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
-                {editingRecord && (
-                  <form onSubmit={handleUpdateRecord}>
-                    <DialogHeader>
-                      <DialogTitle>Edit Data SKP</DialogTitle>
-                      <DialogDescription>
-                        Perbarui informasi pegawai jika terjadi mutasi atau perubahan data lainnya.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-namaPegawai">Nama Lengkap</Label>
-                          <Input id="edit-namaPegawai" name="namaPegawai" defaultValue={editingRecord.namaPegawai} required />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-nip">NIP</Label>
-                          <Input id="edit-nip" name="nip" defaultValue={editingRecord.nip} required />
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-jabatan">Jabatan</Label>
-                          <Input id="edit-jabatan" name="jabatan" defaultValue={editingRecord.jabatan} required />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-unitKerja">Unit Kerja</Label>
-                          <Select name="unitKerja" defaultValue={editingRecord.unitKerja} required>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Pilih Unit Kerja" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {UNIT_KERJA_LIST.map(unit => (
-                                <SelectItem key={unit} value={unit}>{unit}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-tahun">Tahun SKP</Label>
-                          <Input id="edit-tahun" name="tahun" type="number" defaultValue={editingRecord.tahun} required />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-periode">Periode SKP</Label>
-                          <Select name="periode" defaultValue={editingRecord.periode} required>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Pilih Periode" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PERIODE_LIST.map(periode => (
-                                <SelectItem key={periode} value={periode}>{periode}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-3">
-                        <Label>Jenis Dokumen</Label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border rounded-lg p-3 bg-muted/20">
-                          {JENIS_DOKUMEN_LIST.map((item) => (
-                            <div key={item} className="flex items-center space-x-2">
-                              <Checkbox 
-                                id={`edit-jenisDokumen-${item}`} 
-                                name={`jenisDokumen-${item}`} 
-                                defaultChecked={editingRecord.jenisDokumen.includes(item)}
-                              />
-                              <label
-                                htmlFor={`edit-jenisDokumen-${item}`}
-                                className="text-[11px] font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                              >
-                                {item}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-ratingHasilKerja">Rating Hasil Kerja</Label>
-                          <Select name="ratingHasilKerja" defaultValue={editingRecord.ratingHasilKerja}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Pilih Rating" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {RATING_HASIL_KERJA_LIST.map(rating => (
-                                <SelectItem key={rating} value={rating}>{rating}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-ratingHasilPerilaku">Rating Hasil Perilaku</Label>
-                          <Select name="ratingHasilPerilaku" defaultValue={editingRecord.ratingHasilPerilaku}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Pilih Rating" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {RATING_PERILAKU_LIST.map(rating => (
-                                <SelectItem key={rating} value={rating}>{rating}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit-predikatKinerja">Predikat Kinerja</Label>
-                        <Select name="predikatKinerja" defaultValue={editingRecord.predikatKinerja}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Pilih Predikat" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PREDIKAT_KINERJA_LIST.map(predikat => (
-                              <SelectItem key={predikat} value={predikat}>{predikat}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit-file">Ganti Berkas SKP (Opsional)</Label>
-                        <div className="flex flex-col gap-3">
-                          <div className="flex items-center justify-center w-full">
-                            <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-lg cursor-pointer bg-muted/50 hover:bg-muted transition-colors border-muted-foreground/25">
-                              <div className="flex flex-col items-center justify-center pt-2 pb-3">
-                                <UploadCloud className="w-6 h-6 mb-2 text-muted-foreground" />
-                                <p className="text-xs text-muted-foreground">
-                                  <span className="font-semibold">Klik untuk ganti berkas</span> atau drag and drop
-                                </p>
-                              </div>
-                              <input 
-                                id="edit-file" 
-                                name="file" 
-                                type="file" 
-                                className="hidden" 
-                                accept=".pdf,image/*" 
-                                onChange={handleFileChange}
-                              />
-                            </label>
-                          </div>
-                          
-                          {uploadPreview ? (
-                            <div className="p-3 rounded-lg border bg-muted/30 flex items-center gap-3">
-                              <div className="h-12 w-12 rounded border bg-background flex items-center justify-center overflow-hidden shrink-0">
-                                {uploadFileName?.toLowerCase().endsWith('.pdf') ? (
-                                  <FileText className="h-6 w-6 text-red-500" />
-                                ) : (
-                                  <img 
-                                    src={uploadPreview} 
-                                    alt="Preview" 
-                                    className="h-full w-full object-cover"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium truncate">{uploadFileName}</p>
-                                <p className="text-[10px] text-muted-foreground uppercase">Berkas Baru Terpilih</p>
-                              </div>
-                              <Button 
-                                type="button" 
-                                variant="ghost" 
-                                size="icon-xs" 
-                                className="text-muted-foreground hover:text-destructive"
-                                onClick={() => {
-                                  if (uploadPreview) URL.revokeObjectURL(uploadPreview);
-                                  setUploadPreview(null);
-                                  setUploadFileName(null);
-                                  const fileInput = document.getElementById('edit-file') as HTMLInputElement;
-                                  if (fileInput) fileInput.value = '';
-                                }}
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          ) : editingRecord.fileName && (
-                            <div className="p-3 rounded-lg border bg-muted/10 flex items-center gap-3">
-                              <div className="h-10 w-10 rounded border bg-background flex items-center justify-center shrink-0">
-                                <FileText className="h-5 w-5 text-muted-foreground" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium truncate">{editingRecord.fileName}</p>
-                                <p className="text-[10px] text-muted-foreground uppercase">Berkas Saat Ini</p>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
-                      <DialogClose 
-                        nativeButton={true}
-                        render={<Button type="button" variant="outline">Batal</Button>} 
-                      />
-                      <Button type="submit" className="bg-primary hover:bg-primary/90">
-                        Simpan Perubahan
-                      </Button>
-                    </DialogFooter>
-                  </form>
-                )}
-              </DialogContent>
-            </Dialog>
+                  )}
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main className="container mx-auto p-4 md:p-8 space-y-8">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8">
         {activeTab === 'skp' ? (
           <>
             {/* Stats Grid */}
@@ -933,111 +1453,146 @@ export default function App() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <AnimatePresence mode="popLayout">
-                        {filteredRecords.length > 0 ? (
-                          filteredRecords.map((record) => (
-                            <motion.tr
-                              key={record.id}
-                              layout
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
-                              exit={{ opacity: 0 }}
-                              className="group hover:bg-muted/20 transition-colors"
-                            >
-                              <TableCell>
-                                <div className="flex flex-col">
-                                  <span className="font-mono text-sm font-medium">{record.tahun}</span>
-                                  <span className="text-[10px] text-muted-foreground font-bold uppercase">{record.periode}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex flex-col">
-                                  <button 
-                                    onClick={() => {
-                                      setDetailRecord(record);
-                                      setIsDetailDialogOpen(true);
-                                    }}
-                                    className="text-left hover:text-primary hover:underline transition-colors"
-                                  >
-                                    <span className="font-semibold text-sm">{record.namaPegawai}</span>
-                                  </button>
-                                  <span className="text-[10px] text-muted-foreground font-medium">{record.jabatan}</span>
-                                  <span className="text-[10px] text-muted-foreground font-mono">{record.nip}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-2 text-sm">
-                                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                  {record.unitKerja}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <Badge 
-                                  variant={record.status === 'Sudah Diambil' ? 'default' : 'secondary'}
-                                  className={cn(
-                                    "rounded-full px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-                                    record.status === 'Sudah Diambil' 
-                                      ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" 
-                                      : "bg-amber-100 text-amber-700 hover:bg-amber-100"
-                                  )}
-                                >
-                                  {record.status === 'Sudah Diambil' ? (
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  ) : (
-                                    <XCircle className="h-3 w-3 mr-1" />
-                                  )}
-                                  {record.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                {record.status === 'Sudah Diambil' ? (
-                                  <div className="flex flex-col gap-1">
-                                    <div className="flex items-center gap-1.5 text-xs font-medium">
-                                      <User className="h-3 w-3 text-muted-foreground" />
-                                      {record.pengambil}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                                      <CalendarIcon className="h-3 w-3" />
-                                      {record.tanggalAmbil && format(new Date(record.tanggalAmbil), 'dd MMM yyyy, HH:mm', { locale: id })}
-                                    </div>
-                                    <div className="text-[10px] text-muted-foreground italic">
-                                      Unit: {record.unitKerjaPengambil}
-                                    </div>
+                      {isAuthLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                            Memuat data...
+                          </TableCell>
+                        </TableRow>
+                      ) : !user ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="h-32 text-center">
+                            <div className="flex flex-col items-center gap-2">
+                              <p className="text-muted-foreground">Silakan masuk untuk melihat data.</p>
+                              <Button size="sm" onClick={handleLogin}>Masuk dengan Google</Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        <AnimatePresence mode="popLayout">
+                          {filteredRecords.length > 0 ? (
+                            filteredRecords.map((record) => (
+                              <motion.tr
+                                key={record.id}
+                                layout
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="group hover:bg-muted/20 transition-colors"
+                              >
+                                <TableCell>
+                                  <div className="flex flex-col">
+                                    <span className="font-mono text-sm font-medium">{record.tahun}</span>
+                                    <span className="text-[10px] text-muted-foreground font-bold uppercase">{record.periode}</span>
                                   </div>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground italic">Belum ada data</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {record.status === 'Belum Diambil' ? (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    className="h-8 text-xs gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
-                                    onClick={() => {
-                                      setSelectedRecord(record);
-                                      setIsTakeDialogOpen(true);
-                                    }}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-col">
+                                    <button 
+                                      onClick={() => {
+                                        setDetailRecord(record);
+                                        setIsDetailDialogOpen(true);
+                                      }}
+                                      className="text-left hover:text-primary hover:underline transition-colors"
+                                    >
+                                      <span className="font-semibold text-sm">{record.namaPegawai}</span>
+                                    </button>
+                                    <span className="text-[10px] text-muted-foreground font-medium">{record.jabatan}</span>
+                                    <span className="text-[10px] text-muted-foreground font-mono">{record.nip}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                    {record.unitKerja}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge 
+                                    variant={record.status === 'Sudah Diambil' ? 'default' : 'secondary'}
+                                    className={cn(
+                                      "rounded-full px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                                      record.status === 'Sudah Diambil' 
+                                        ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" 
+                                        : "bg-amber-100 text-amber-700 hover:bg-amber-100"
+                                    )}
                                   >
-                                    <FileCheck className="h-3.5 w-3.5" />
-                                    Ambil Berkas
-                                  </Button>
-                                ) : (
-                                  <Button size="icon" variant="ghost" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <MoreVertical className="h-4 w-4" />
-                                  </Button>
-                                )}
+                                    {record.status === 'Sudah Diambil' ? (
+                                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                                    ) : (
+                                      <XCircle className="h-3 w-3 mr-1" />
+                                    )}
+                                    {record.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {record.status === 'Sudah Diambil' ? (
+                                    <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-1.5 text-xs font-medium">
+                                        <User className="h-3 w-3 text-muted-foreground" />
+                                        {record.pengambil}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                        <CalendarIcon className="h-3 w-3" />
+                                        {record.tanggalAmbil && format(new Date(record.tanggalAmbil), 'dd MMM yyyy, HH:mm', { locale: id })}
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground italic">
+                                        Unit: {record.unitKerjaPengambil}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground italic">Belum ada data</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {record.status === 'Belum Diambil' ? (
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        className="h-8 text-xs gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                                        onClick={() => {
+                                          setSelectedRecord(record);
+                                          setIsTakeDialogOpen(true);
+                                        }}
+                                      >
+                                        <FileCheck className="h-3.5 w-3.5" />
+                                        Ambil Berkas
+                                      </Button>
+                                    ) : (
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        onClick={() => {
+                                          setEditingRecord(record);
+                                          setIsEditDialogOpen(true);
+                                        }}
+                                      >
+                                        <UserCog className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                    <Button 
+                                      size="icon" 
+                                      variant="ghost" 
+                                      className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      onClick={() => handleDeleteRecord(record.id)}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </motion.tr>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                                Tidak ada data yang ditemukan.
                               </TableCell>
-                            </motion.tr>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                              Tidak ada data yang ditemukan.
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </AnimatePresence>
+                            </TableRow>
+                          )}
+                        </AnimatePresence>
+                      )}
                     </TableBody>
                   </Table>
                 </div>
@@ -1049,7 +1604,13 @@ export default function App() {
             {/* PLT/PLH Stats Grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-                <Card className="overflow-hidden border-none shadow-sm hover:shadow-md transition-shadow">
+                <Card 
+                  className={cn(
+                    "overflow-hidden border-none shadow-sm hover:shadow-md transition-all cursor-pointer",
+                    statusFilterPlt === 'all' ? "ring-2 ring-primary ring-offset-2" : ""
+                  )}
+                  onClick={() => setStatusFilterPlt('all')}
+                >
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">Total PLT</CardTitle>
                     <UserCog className="h-4 w-4 text-primary" />
@@ -1062,7 +1623,13 @@ export default function App() {
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-                <Card className="overflow-hidden border-none shadow-sm hover:shadow-md transition-shadow">
+                <Card 
+                  className={cn(
+                    "overflow-hidden border-none shadow-sm hover:shadow-md transition-all cursor-pointer",
+                    statusFilterPlt === 'Aktif' ? "ring-2 ring-emerald-500 ring-offset-2" : ""
+                  )}
+                  onClick={() => setStatusFilterPlt(statusFilterPlt === 'Aktif' ? 'all' : 'Aktif')}
+                >
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">PLT Aktif</CardTitle>
                     <CheckCircle2 className="h-4 w-4 text-emerald-500" />
@@ -1075,7 +1642,13 @@ export default function App() {
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-                <Card className="overflow-hidden border-none shadow-sm hover:shadow-md transition-shadow">
+                <Card 
+                  className={cn(
+                    "overflow-hidden border-none shadow-sm hover:shadow-md transition-all cursor-pointer",
+                    statusFilterPlh === 'all' ? "ring-2 ring-blue-500 ring-offset-2" : ""
+                  )}
+                  onClick={() => setStatusFilterPlh('all')}
+                >
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">Total PLH</CardTitle>
                     <UserCheck className="h-4 w-4 text-blue-500" />
@@ -1088,7 +1661,13 @@ export default function App() {
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-                <Card className="overflow-hidden border-none shadow-sm hover:shadow-md transition-shadow">
+                <Card 
+                  className={cn(
+                    "overflow-hidden border-none shadow-sm hover:shadow-md transition-all cursor-pointer",
+                    statusFilterPlh === 'Aktif' ? "ring-2 ring-blue-400 ring-offset-2" : ""
+                  )}
+                  onClick={() => setStatusFilterPlh(statusFilterPlh === 'Aktif' ? 'all' : 'Aktif')}
+                >
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">PLH Aktif</CardTitle>
                     <CheckCircle2 className="h-4 w-4 text-blue-400" />
@@ -1101,6 +1680,61 @@ export default function App() {
               </motion.div>
             </div>
 
+            {/* PLT/PLH Chart */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
+              <Card className="border-none shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-lg">Grafik Penugasan PLT & PLH per Tahun</CardTitle>
+                  <CardDescription>Perbandingan jumlah penugasan Pelaksana Tugas dan Pelaksana Harian.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={chartDataPltPlh}
+                        margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                        <XAxis 
+                          dataKey="year" 
+                          axisLine={false} 
+                          tickLine={false} 
+                          tick={{ fill: '#666', fontSize: 12 }}
+                          dy={10}
+                        />
+                        <YAxis 
+                          axisLine={false} 
+                          tickLine={false} 
+                          tick={{ fill: '#666', fontSize: 12 }}
+                        />
+                        <Tooltip 
+                          cursor={{ fill: '#f8f9fa' }}
+                          contentStyle={{ 
+                            borderRadius: '8px', 
+                            border: 'none', 
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)' 
+                          }}
+                        />
+                        <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ paddingBottom: '20px' }} />
+                        <Bar 
+                          dataKey="PLT" 
+                          fill="#1A4A9A" 
+                          radius={[4, 4, 0, 0]} 
+                          barSize={30}
+                        />
+                        <Bar 
+                          dataKey="PLH" 
+                          fill="#3b82f6" 
+                          radius={[4, 4, 0, 0]} 
+                          barSize={30}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
             {/* PLT Table */}
             <Card className="border-none shadow-sm overflow-hidden">
               <CardHeader className="bg-white border-b pb-6">
@@ -1109,14 +1743,43 @@ export default function App() {
                     <CardTitle>Daftar Pelaksana Tugas (PLT)</CardTitle>
                     <CardDescription>Monitoring penugasan Pelaksana Tugas di lingkungan BSKJI.</CardDescription>
                   </div>
-                  <div className="relative w-full md:w-64">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input 
-                      placeholder="Cari PLT..." 
-                      className="pl-9 bg-muted/50 border-none focus-visible:ring-1"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
+                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                    <div className="relative w-full md:w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input 
+                        placeholder="Cari PLT..." 
+                        className="pl-9 bg-muted/50 border-none focus-visible:ring-1"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <Select value={yearFilterPltPlh} onValueChange={setYearFilterPltPlh}>
+                      <SelectTrigger className="w-full md:w-[130px] bg-muted/50 border-none h-10">
+                        <div className="flex items-center gap-2">
+                          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                          <SelectValue placeholder="Tahun" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Semua Tahun</SelectItem>
+                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                          <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={statusFilterPlt} onValueChange={setStatusFilterPlt}>
+                      <SelectTrigger className="w-full md:w-[130px] bg-muted/50 border-none h-10">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          <SelectValue placeholder="Status" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Semua Status</SelectItem>
+                        <SelectItem value="Aktif">Aktif</SelectItem>
+                        <SelectItem value="Selesai">Selesai</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </CardHeader>
@@ -1126,10 +1789,11 @@ export default function App() {
                     <TableHeader className="bg-muted/30">
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Pegawai</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Jabatan PLT</TableHead>
+                        <TableHead className="font-bold text-xs uppercase tracking-wider">Penugasan</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Periode</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Status</TableHead>
+                        <TableHead className="font-bold text-xs uppercase tracking-wider text-right">Aksi</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1174,6 +1838,29 @@ export default function App() {
                                 {record.status}
                               </Badge>
                             </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  size="icon" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => {
+                                    setEditingPltRecord(record);
+                                    setIsEditPltPlhDialogOpen(true);
+                                  }}
+                                >
+                                  <UserCog className="h-4 w-4" />
+                                </Button>
+                                <Button 
+                                  size="icon" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => handleDeletePltPlhRecord(record.id, 'PLT')}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))
                       ) : (
@@ -1195,6 +1882,44 @@ export default function App() {
                     <CardTitle>Daftar Pelaksana Harian (PLH)</CardTitle>
                     <CardDescription>Monitoring penugasan Pelaksana Harian di lingkungan BSKJI.</CardDescription>
                   </div>
+                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                    <div className="relative w-full md:w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input 
+                        placeholder="Cari PLH..." 
+                        className="pl-9 bg-muted/50 border-none focus-visible:ring-1"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <Select value={yearFilterPltPlh} onValueChange={setYearFilterPltPlh}>
+                      <SelectTrigger className="w-full md:w-[130px] bg-muted/50 border-none h-10">
+                        <div className="flex items-center gap-2">
+                          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                          <SelectValue placeholder="Tahun" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Semua Tahun</SelectItem>
+                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                          <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={statusFilterPlh} onValueChange={setStatusFilterPlh}>
+                      <SelectTrigger className="w-full md:w-[130px] bg-muted/50 border-none h-10">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          <SelectValue placeholder="Status" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Semua Status</SelectItem>
+                        <SelectItem value="Aktif">Aktif</SelectItem>
+                        <SelectItem value="Selesai">Selesai</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -1203,10 +1928,11 @@ export default function App() {
                     <TableHeader className="bg-muted/30">
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Pegawai</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Jabatan PLH</TableHead>
+                        <TableHead className="font-bold text-xs uppercase tracking-wider">Penugasan</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Periode</TableHead>
                         <TableHead className="font-bold text-xs uppercase tracking-wider">Status</TableHead>
+                        <TableHead className="font-bold text-xs uppercase tracking-wider text-right">Aksi</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1251,6 +1977,29 @@ export default function App() {
                                 {record.status}
                               </Badge>
                             </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  size="icon" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => {
+                                    setEditingPlhRecord(record);
+                                    setIsEditPltPlhDialogOpen(true);
+                                  }}
+                                >
+                                  <UserCog className="h-4 w-4" />
+                                </Button>
+                                <Button 
+                                  size="icon" 
+                                  variant="ghost" 
+                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => handleDeletePltPlhRecord(record.id, 'PLH')}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))
                       ) : (
@@ -1267,65 +2016,201 @@ export default function App() {
         )}
       </main>
 
+      {/* Edit PLT/PLH Dialog */}
+      <Dialog open={isEditPltPlhDialogOpen} onOpenChange={(open) => {
+        setIsEditPltPlhDialogOpen(open);
+        if (!open) {
+          setEditingPltRecord(null);
+          setEditingPlhRecord(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          {isEditPltPlhDialogOpen && (
+            <form onSubmit={handleUpdatePltPlhRecord}>
+              <DialogHeader>
+                <DialogTitle>Edit Data {editingPltRecord ? 'PLT' : 'PLH'}</DialogTitle>
+                <DialogDescription>
+                  Perbarui informasi penugasan pegawai.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-6 py-6">
+                <input type="hidden" name="type" value={editingPltRecord ? 'PLT' : 'PLH'} />
+                
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-namaPegawai">Nama Lengkap</Label>
+                  <Input 
+                    id="edit-namaPegawai" 
+                    name="namaPegawai" 
+                    defaultValue={editingPltRecord?.namaPegawai || editingPlhRecord?.namaPegawai} 
+                    required 
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-nip">NIP</Label>
+                    <Input 
+                      id="edit-nip" 
+                      name="nip" 
+                      defaultValue={editingPltRecord?.nip || editingPlhRecord?.nip} 
+                      required 
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-status">Status</Label>
+                    <Select name="status" defaultValue={editingPltRecord?.status || editingPlhRecord?.status || 'Aktif'}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pilih Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Aktif">Aktif</SelectItem>
+                        <SelectItem value="Selesai">Selesai</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-jabatanAsli">Jabatan Asli</Label>
+                    <Input 
+                      id="edit-jabatanAsli" 
+                      name="jabatanAsli" 
+                      defaultValue={editingPltRecord?.jabatanAsli || editingPlhRecord?.jabatanAsli} 
+                      required 
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-jabatanTugas">Penugasan</Label>
+                    <Input 
+                      id="edit-jabatanTugas" 
+                      name="jabatanTugas" 
+                      defaultValue={editingPltRecord?.jabatanPlt || editingPlhRecord?.jabatanPlh} 
+                      required 
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-unitKerja">Unit Kerja</Label>
+                  <Select name="unitKerja" defaultValue={editingPltRecord?.unitKerja || editingPlhRecord?.unitKerja}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih Unit Kerja" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UNIT_KERJA_LIST.map(unit => (
+                        <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-noSk">Nomor SK</Label>
+                  <Input 
+                    id="edit-noSk" 
+                    name="noSk" 
+                    defaultValue={editingPltRecord?.noSk || editingPlhRecord?.noSk} 
+                    required 
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-tglMulai">Tanggal Mulai</Label>
+                    <Input 
+                      id="edit-tglMulai" 
+                      name="tglMulai" 
+                      type="date" 
+                      defaultValue={editingPltRecord?.tglMulai || editingPlhRecord?.tglMulai} 
+                      required 
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-tglSelesai">Tanggal Selesai</Label>
+                    <Input 
+                      id="edit-tglSelesai" 
+                      name="tglSelesai" 
+                      type="date" 
+                      defaultValue={editingPltRecord?.tglSelesai || editingPlhRecord?.tglSelesai} 
+                      required 
+                    />
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <DialogClose 
+                  nativeButton={true}
+                  render={<Button type="button" variant="outline">Batal</Button>} 
+                />
+                <Button type="submit">Simpan Perubahan</Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Take SKP Dialog */}
       <Dialog open={isTakeDialogOpen} onOpenChange={setIsTakeDialogOpen}>
         <DialogContent className="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
-          <form onSubmit={handleTakeSKP}>
-            <DialogHeader>
-              <DialogTitle>Konfirmasi Pengambilan Berkas</DialogTitle>
-              <DialogDescription>
-                Catat informasi siapa yang mengambil berkas SKP milik <strong>{selectedRecord?.namaPegawai}</strong>.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="pengambil">Nama Pengambil</Label>
-                <Input id="pengambil" name="pengambil" placeholder="Nama lengkap pengambil" required />
+          {isTakeDialogOpen && (
+            <form onSubmit={handleTakeSKP}>
+              <DialogHeader>
+                <DialogTitle>Konfirmasi Pengambilan Berkas</DialogTitle>
+                <DialogDescription>
+                  Catat informasi siapa yang mengambil berkas SKP milik <strong>{selectedRecord?.namaPegawai}</strong>.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="pengambil">Nama Pengambil</Label>
+                  <Input id="pengambil" name="pengambil" placeholder="Nama lengkap pengambil" required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="unitKerjaPengambil">Unit Kerja Pengambil</Label>
+                  <Select name="unitKerjaPengambil" required>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih Unit Kerja" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UNIT_KERJA_LIST.map(unit => (
+                        <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="tanggalAmbil">Tanggal Pengambilan</Label>
+                  <Input 
+                    id="tanggalAmbil" 
+                    name="tanggalAmbil" 
+                    type="datetime-local" 
+                    defaultValue={new Date().toISOString().slice(0, 16)} 
+                    required 
+                  />
+                </div>
+                <div className="p-3 rounded-lg bg-muted/50 border text-[11px] text-muted-foreground">
+                  <p><strong>Catatan:</strong> Anda dapat menyesuaikan tanggal dan waktu pengambilan jika diperlukan.</p>
+                </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="unitKerjaPengambil">Unit Kerja Pengambil</Label>
-                <Select name="unitKerjaPengambil" required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih Unit Kerja" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {UNIT_KERJA_LIST.map(unit => (
-                      <SelectItem key={unit} value={unit}>{unit}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="tanggalAmbil">Tanggal Pengambilan</Label>
-                <Input 
-                  id="tanggalAmbil" 
-                  name="tanggalAmbil" 
-                  type="datetime-local" 
-                  defaultValue={new Date().toISOString().slice(0, 16)} 
-                  required 
+              <DialogFooter>
+                <DialogClose 
+                  nativeButton={true}
+                  render={<Button type="button" variant="ghost">Batal</Button>} 
                 />
-              </div>
-              <div className="p-3 rounded-lg bg-muted/50 border text-[11px] text-muted-foreground">
-                <p><strong>Catatan:</strong> Anda dapat menyesuaikan tanggal dan waktu pengambilan jika diperlukan.</p>
-              </div>
-            </div>
-            <DialogFooter>
-              <DialogClose 
-                nativeButton={true}
-                render={<Button type="button" variant="ghost" />}
-              >
-                Batal
-              </DialogClose>
-              <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700">Konfirmasi Ambil</Button>
-            </DialogFooter>
-          </form>
+                <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700">Konfirmasi Ambil</Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
 
       {/* Detail Dialog */}
       <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
         <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+          {isDetailDialogOpen && detailRecord && (
+            <>
+              <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <User className="h-5 w-5 text-primary" />
               Detail Informasi Pegawai
@@ -1483,6 +2368,8 @@ export default function App() {
               render={<Button variant="secondary">Tutup</Button>} 
             />
           </DialogFooter>
+          </>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -1550,9 +2437,39 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <div className="flex items-center gap-3 text-destructive mb-2">
+              <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <DialogTitle>Konfirmasi Hapus</DialogTitle>
+            </div>
+            <DialogDescription>
+              Apakah Anda yakin ingin menghapus data {deletingInfo?.type === 'SKP' ? 'SKP' : deletingInfo?.type} ini? Tindakan ini tidak dapat dibatalkan.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4 gap-2 sm:gap-0">
+            <DialogClose 
+              nativeButton={true}
+              render={<Button variant="outline">Batal</Button>} 
+            />
+            <Button 
+              variant="destructive" 
+              onClick={confirmDelete}
+            >
+              Hapus Sekarang
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <footer className="container mx-auto p-8 text-center text-xs text-muted-foreground">
         <p>&copy; {new Date().getFullYear()} Monitoring SKP Pegawai. Sistem Monitoring Berkas Kepegawaian.</p>
       </footer>
     </div>
-  );
+  </div>
+);
 }
