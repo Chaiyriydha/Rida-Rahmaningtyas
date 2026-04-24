@@ -22,15 +22,15 @@ import {
   ArrowRight,
   User,
   FileText,
-  Eye,
-  UploadCloud,
   X,
   UserCheck,
   UserCog,
   LogOut,
   LogIn,
   AlertTriangle,
-  Pencil
+  Pencil,
+  Archive,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -142,7 +142,7 @@ import {
 } from 'recharts';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'tim-kerja' | 'skp' | 'plt-plh'>('tim-kerja');
+  const [activeTab, setActiveTab] = useState<'tim-kerja' | 'skp' | 'plt-plh' | 'arsip'>('tim-kerja');
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [records, setRecords] = useState<SKPRecord[]>([]);
@@ -178,7 +178,6 @@ export default function App() {
   const [isTakeDialogOpen, setIsTakeDialogOpen] = useState(false);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isViewFileOpen, setIsViewFileOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<SKPRecord | null>(null);
   const [detailRecord, setDetailRecord] = useState<SKPRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<SKPRecord | null>(null);
@@ -198,10 +197,6 @@ export default function App() {
   const [pendingSubTeams, setPendingSubTeams] = useState<{ namaTim: string, ketua: TeamMember, anggota: TeamMember[] }[]>([]);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'PLT' | 'PLH' | 'TIM' } | null>(null);
-  const [viewingFileUrl, setViewingFileUrl] = useState<string | null>(null);
-  const [viewingFileName, setViewingFileName] = useState<string | null>(null);
-  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
-  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
 
   // Auth Effect
   React.useEffect(() => {
@@ -347,18 +342,6 @@ export default function App() {
     checkExpiredRecords();
   }, [user, plhRecords, pltRecords]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (uploadPreview) URL.revokeObjectURL(uploadPreview);
-      setUploadPreview(URL.createObjectURL(file));
-      setUploadFileName(file.name);
-    } else {
-      setUploadPreview(null);
-      setUploadFileName(null);
-    }
-  };
-
   // Stats calculation
   const stats = useMemo(() => {
     const total = records.length;
@@ -462,19 +445,6 @@ export default function App() {
     const formData = new FormData(e.currentTarget);
     const selectedJenisDokumen = JENIS_DOKUMEN_LIST.filter(item => formData.get(`jenisDokumen-${item}`) === 'on');
     
-    const fileInput = e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement;
-    const file = fileInput?.files?.[0];
-    
-    let fileUrl = '';
-    let fileName = '';
-    
-    // Note: In a real app, we would upload to Firebase Storage here.
-    // For now, we'll use object URLs as placeholders or just store the metadata.
-    if (file) {
-      fileUrl = URL.createObjectURL(file);
-      fileName = file.name;
-    }
-
     try {
       const newRecord = {
         nip: formData.get('nip') as string,
@@ -488,8 +458,6 @@ export default function App() {
         ratingHasilKerja: formData.get('ratingHasilKerja') as string,
         ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
         predikatKinerja: formData.get('predikatKinerja') as string,
-        fileUrl,
-        fileName,
         authorUid: user.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -497,8 +465,6 @@ export default function App() {
 
       await addDoc(collection(db, 'skp_records'), newRecord);
       setIsAddDialogOpen(false);
-      setUploadPreview(null);
-      setUploadFileName(null);
       toast.success('Data SKP berhasil disimpan ke database');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'skp_records');
@@ -547,17 +513,6 @@ export default function App() {
     const formData = new FormData(e.currentTarget);
     const selectedJenisDokumen = JENIS_DOKUMEN_LIST.filter(item => formData.get(`jenisDokumen-${item}`) === 'on');
     
-    const fileInput = e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement;
-    const file = fileInput?.files?.[0];
-    
-    let fileUrl = editingRecord.fileUrl;
-    let fileName = editingRecord.fileName;
-    
-    if (file) {
-      fileUrl = URL.createObjectURL(file);
-      fileName = file.name;
-    }
-
     try {
       const updatedData = {
         nip: formData.get('nip') as string,
@@ -570,16 +525,12 @@ export default function App() {
         ratingHasilKerja: formData.get('ratingHasilKerja') as string,
         ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
         predikatKinerja: formData.get('predikatKinerja') as string,
-        fileUrl,
-        fileName,
         updatedAt: serverTimestamp(),
       };
 
       await updateDoc(doc(db, 'skp_records', editingRecord.id), updatedData);
       setIsEditDialogOpen(false);
       setEditingRecord(null);
-      setUploadPreview(null);
-      setUploadFileName(null);
       toast.success('Data SKP berhasil diperbarui');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `skp_records/${editingRecord.id}`);
@@ -1186,6 +1137,17 @@ export default function App() {
               <LayoutDashboard className="h-4 w-4" />
               PLT & PLH
             </Button>
+            <Button 
+              variant={activeTab === 'arsip' ? 'default' : 'ghost'} 
+              className={cn(
+                "justify-start gap-3 h-10 px-4 transition-all", 
+                activeTab === 'arsip' ? "shadow-sm" : "text-muted-foreground"
+              )}
+              onClick={() => setActiveTab('arsip')}
+            >
+              <Archive className="h-4 w-4" />
+              Arsip Dokumen
+            </Button>
           </nav>
         </div>
 
@@ -1230,7 +1192,7 @@ export default function App() {
 
             <div className="hidden md:block">
               <h2 className="text-sm font-semibold text-muted-foreground">
-                {activeTab === 'tim-kerja' ? 'Monitoring Tim Kerja' : activeTab === 'skp' ? 'Monitoring SKP Pegawai' : 'Monitoring PLT & PLH'}
+                {activeTab === 'tim-kerja' ? 'Monitoring Tim Kerja' : activeTab === 'skp' ? 'Monitoring SKP Pegawai' : activeTab === 'plt-plh' ? 'Monitoring PLT & PLH' : 'Arsip Dokumen'}
               </h2>
             </div>
 
@@ -1511,11 +1473,6 @@ export default function App() {
                   </Button>
                   <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
                     setIsAddDialogOpen(open);
-                    if (!open) {
-                      if (uploadPreview) URL.revokeObjectURL(uploadPreview);
-                      setUploadPreview(null);
-                      setUploadFileName(null);
-                    }
                   }}>
                     <DialogTrigger 
                       nativeButton={true}
@@ -1530,7 +1487,7 @@ export default function App() {
                           <DialogHeader>
                             <DialogTitle>Tambah Data SKP Baru</DialogTitle>
                             <DialogDescription>
-                              Masukkan informasi pegawai untuk monitoring berkas SKP.
+                              Masukkan informasi pegawai untuk monitoring SKP.
                             </DialogDescription>
                           </DialogHeader>
                           <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
@@ -1643,67 +1600,6 @@ export default function App() {
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </div>
-
-                            <div className="grid gap-2">
-                              <Label htmlFor="file">Upload Berkas SKP (PDF/Gambar)</Label>
-                              <div className="flex flex-col gap-3">
-                                <div className="flex items-center justify-center w-full">
-                                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-lg cursor-pointer bg-muted/50 hover:bg-muted transition-colors border-muted-foreground/25">
-                                    <div className="flex flex-col items-center justify-center pt-2 pb-3">
-                                      <UploadCloud className="w-6 h-6 mb-2 text-muted-foreground" />
-                                      <p className="text-xs text-muted-foreground">
-                                        <span className="font-semibold">Klik untuk upload</span> atau drag and drop
-                                      </p>
-                                    </div>
-                                    <input 
-                                      id="file" 
-                                      name="file" 
-                                      type="file" 
-                                      className="hidden" 
-                                      accept=".pdf,image/*" 
-                                      onChange={handleFileChange}
-                                    />
-                                  </label>
-                                </div>
-                                
-                                {uploadPreview && (
-                                  <div className="p-3 rounded-lg border bg-muted/30 flex items-center gap-3">
-                                    <div className="h-12 w-12 rounded border bg-background flex items-center justify-center overflow-hidden shrink-0">
-                                      {uploadFileName?.toLowerCase().endsWith('.pdf') ? (
-                                        <FileText className="h-6 w-6 text-red-500" />
-                                      ) : (
-                                        <img 
-                                          src={uploadPreview} 
-                                          alt="Preview" 
-                                          className="h-full w-full object-cover"
-                                          referrerPolicy="no-referrer"
-                                        />
-                                      )}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-xs font-medium truncate">{uploadFileName}</p>
-                                      <p className="text-[10px] text-muted-foreground uppercase">Siap untuk disimpan</p>
-                                    </div>
-                                    <Button 
-                                      type="button" 
-                                      variant="ghost" 
-                                      size="icon-xs" 
-                                      className="text-muted-foreground hover:text-destructive"
-                                      onClick={() => {
-                                        if (uploadPreview) URL.revokeObjectURL(uploadPreview);
-                                        setUploadPreview(null);
-                                        setUploadFileName(null);
-                                        // Reset file input
-                                        const fileInput = document.getElementById('file') as HTMLInputElement;
-                                        if (fileInput) fileInput.value = '';
-                                      }}
-                                    >
-                                      <X className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
                             </div>
                           </div>
                           <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
@@ -1869,9 +1765,6 @@ export default function App() {
                 setIsEditDialogOpen(open);
                 if (!open) {
                   setEditingRecord(null);
-                  if (uploadPreview) URL.revokeObjectURL(uploadPreview);
-                  setUploadPreview(null);
-                  setUploadFileName(null);
                 }
               }}>
                 <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
@@ -1997,76 +1890,6 @@ export default function App() {
                               ))}
                             </SelectContent>
                           </Select>
-                        </div>
-
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-file">Ganti Berkas SKP (Opsional)</Label>
-                          <div className="flex flex-col gap-3">
-                            <div className="flex items-center justify-center w-full">
-                              <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-lg cursor-pointer bg-muted/50 hover:bg-muted transition-colors border-muted-foreground/25">
-                                <div className="flex flex-col items-center justify-center pt-2 pb-3">
-                                  <UploadCloud className="w-6 h-6 mb-2 text-muted-foreground" />
-                                  <p className="text-xs text-muted-foreground">
-                                    <span className="font-semibold">Klik untuk ganti berkas</span> atau drag and drop
-                                  </p>
-                                </div>
-                                <input 
-                                  id="edit-file" 
-                                  name="file" 
-                                  type="file" 
-                                  className="hidden" 
-                                  accept=".pdf,image/*" 
-                                  onChange={handleFileChange}
-                                />
-                              </label>
-                            </div>
-                            
-                            {uploadPreview ? (
-                              <div className="p-3 rounded-lg border bg-muted/30 flex items-center gap-3">
-                                <div className="h-12 w-12 rounded border bg-background flex items-center justify-center overflow-hidden shrink-0">
-                                  {uploadFileName?.toLowerCase().endsWith('.pdf') ? (
-                                    <FileText className="h-6 w-6 text-red-500" />
-                                  ) : (
-                                    <img 
-                                      src={uploadPreview} 
-                                      alt="Preview" 
-                                      className="h-full w-full object-cover"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                  )}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-medium truncate">{uploadFileName}</p>
-                                  <p className="text-[10px] text-muted-foreground uppercase">Berkas Baru Terpilih</p>
-                                </div>
-                                <Button 
-                                  type="button" 
-                                  variant="ghost" 
-                                  size="icon-xs" 
-                                  className="text-muted-foreground hover:text-destructive"
-                                  onClick={() => {
-                                    if (uploadPreview) URL.revokeObjectURL(uploadPreview);
-                                    setUploadPreview(null);
-                                    setUploadFileName(null);
-                                    const fileInput = document.getElementById('edit-file') as HTMLInputElement;
-                                    if (fileInput) fileInput.value = '';
-                                  }}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            ) : editingRecord.fileName && (
-                              <div className="p-3 rounded-lg border bg-muted/10 flex items-center gap-3">
-                                <div className="h-10 w-10 rounded border bg-background flex items-center justify-center shrink-0">
-                                  <FileText className="h-5 w-5 text-muted-foreground" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-medium truncate">{editingRecord.fileName}</p>
-                                  <p className="text-[10px] text-muted-foreground uppercase">Berkas Saat Ini</p>
-                                </div>
-                              </div>
-                            )}
-                          </div>
                         </div>
                       </div>
                       <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
@@ -2400,7 +2223,7 @@ export default function App() {
               </CardContent>
             </Card>
           </>
-        ) : (
+        ) : activeTab === 'plt-plh' ? (
           <div className="space-y-8">
             {/* PLT/PLH Stats Grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -2846,6 +2669,92 @@ export default function App() {
               </CardContent>
             </Card>
           </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed shadow-sm">
+            <div className="h-20 w-20 rounded-full bg-primary/5 flex items-center justify-center mb-6">
+              <Archive className="h-10 w-10 text-primary/40" />
+            </div>
+            <h3 className="text-xl font-bold text-[#1A4A9A]">Arsip Dokumen BSKJI</h3>
+            <p className="text-sm text-muted-foreground/60 max-w-md text-center mt-2 px-6">
+              Akses berkas digital dan dokumen arsip BSKJI melalui portal Google Drive resmi. 
+              Pastikan Anda menggunakan akun email resmi kementerian untuk dapat mengakses folder.
+            </p>
+
+            <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-6 w-full max-w-5xl px-6">
+              {[
+                { 
+                  title: "SKP Digital", 
+                  desc: "Arsip berkas SKP per Tahun", 
+                  icon: FileText,
+                  subItems: [
+                    { label: "SKP Tahun 2024", link: "https://drive.google.com/drive/folders/1AUbnsuuGburDUOmW2EjN1q2HBxNZGC4B?usp=drive_link" },
+                    { label: "SKP Tahun 2025", link: "https://drive.google.com/drive/folders/1dxmSz4Hg2r9bi70Sr83HZt9nrkCmSUfS?usp=drive_link" },
+                    { label: "SKP Tahun 2026", link: "https://drive.google.com/drive/folders/1NrZwNme-meV5w4dQoo-PlDiEfBuijFdH?usp=drive_link" },
+                    { label: "SKP Tahun 2027", link: "#" },
+                    { label: "SKP Tahun 2028", link: "#" },
+                    { label: "SKP Tahun 2029", link: "#" },
+                    { label: "SKP Tahun 2030", link: "#" },
+                  ]
+                },
+                { 
+                  title: "Surat Perintah", 
+                  desc: "Arsip berkas PLT & PLH per Tahun", 
+                  icon: FileCheck,
+                  subItems: [
+                    { label: "SP Tahun 2024", link: "#" },
+                    { label: "SP Tahun 2025", link: "https://drive.google.com/drive/folders/1_Pw651x0UwAbpZsu-YNMoqm8t74j5Qmr?usp=drive_link" },
+                    { label: "SP Tahun 2026", link: "https://drive.google.com/drive/folders/1A2zdCJJ0W9BOsFUD9XxY8B8e_j-5sIOU?usp=drive_link" },
+                    { label: "SP Tahun 2027", link: "#" },
+                    { label: "SP Tahun 2028", link: "#" },
+                    { label: "SP Tahun 2029", link: "#" },
+                    { label: "SP Tahun 2030", link: "#" },
+                  ]
+                },
+                { title: "Laporan Kinerja", desc: "Laporan periodik unit kerja", icon: LayoutDashboard },
+              ].map((item, i) => (
+                <div 
+                  key={i} 
+                  className={cn(
+                    "p-6 rounded-2xl border bg-white flex flex-col items-center text-center shadow-sm",
+                    "hover:shadow-md transition-shadow"
+                  )}
+                >
+                  <div className="h-12 w-12 rounded-xl bg-primary/5 flex items-center justify-center mb-4">
+                    <item.icon className="h-6 w-6 text-primary" />
+                  </div>
+                  <h4 className="text-sm font-bold text-primary uppercase tracking-wider">{item.title}</h4>
+                  <p className="text-[10px] text-muted-foreground mt-1 mb-4">{item.desc}</p>
+                  
+                  {item.subItems ? (
+                    <div className="w-full space-y-2 mt-2">
+                      {item.subItems.map((sub, idx) => (
+                        <Button 
+                          key={idx}
+                          variant="outline" 
+                          size="sm" 
+                          className="w-full justify-start h-8 text-[10px] font-medium bg-muted/5 border-muted-foreground/10 hover:bg-primary/5 hover:text-primary hover:border-primary/20"
+                          disabled={!sub.link || sub.link === '#'}
+                          onClick={() => sub.link && sub.link !== '#' && window.open(sub.link, '_blank')}
+                        >
+                          <ExternalLink className="h-3 w-3 mr-2 opacity-50" />
+                          {sub.label}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="mt-2 text-[10px] font-bold text-muted-foreground/60"
+                      disabled
+                    >
+                      Segera Hadir
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </main>
 
@@ -3179,46 +3088,6 @@ export default function App() {
                   </div>
                 </div>
               )}
-
-              {detailRecord.fileUrl ? (
-                <div className="space-y-3">
-                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Berkas Digital</Label>
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="secondary" 
-                      size="sm" 
-                      className="flex-1 gap-2 bg-primary/10 text-primary hover:bg-primary/20 border-primary/20"
-                      onClick={() => {
-                        setViewingFileUrl(detailRecord.fileUrl || null);
-                        setViewingFileName(detailRecord.fileName || 'berkas-skp');
-                        setIsViewFileOpen(true);
-                      }}
-                    >
-                      <Eye className="h-4 w-4" />
-                      Lihat Berkas
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="flex-1 gap-2"
-                      nativeButton={false}
-                      render={
-                        <a href={detailRecord.fileUrl} download={detailRecord.fileName || 'berkas-skp'}>
-                          <Download className="h-4 w-4" />
-                          Unduh Berkas
-                        </a>
-                      }
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Berkas Digital</Label>
-                  <div className="p-3 rounded-lg border border-dashed flex items-center justify-center bg-muted/20">
-                    <span className="text-xs text-muted-foreground italic">Belum ada berkas digital yang diunggah</span>
-                  </div>
-                </div>
-              )}
             </div>
           )}
           <DialogFooter>
@@ -3244,70 +3113,6 @@ export default function App() {
       </Dialog>
 
       {/* View File Dialog */}
-      <Dialog open={isViewFileOpen} onOpenChange={setIsViewFileOpen}>
-        <DialogContent className="sm:max-w-[800px] h-[80vh] flex flex-col p-0 overflow-hidden">
-          <DialogHeader className="p-6 border-b">
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" />
-              Pratinjau Berkas: {viewingFileName}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 bg-muted/30 overflow-auto p-4 flex items-center justify-center">
-            {viewingFileUrl ? (
-              viewingFileName?.toLowerCase().endsWith('.pdf') ? (
-                <div className="w-full h-full flex flex-col gap-4">
-                  <object 
-                    data={viewingFileUrl} 
-                    type="application/pdf"
-                    className="w-full h-full rounded border shadow-sm"
-                  >
-                    <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-background rounded border">
-                      <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                      <p className="text-sm font-medium mb-2">Pratinjau PDF tidak dapat ditampilkan secara otomatis</p>
-                      <p className="text-xs text-muted-foreground mb-4">Browser Anda mungkin memblokir pratinjau berkas PDF di dalam jendela ini.</p>
-                      <Button 
-                        variant="outline"
-                        nativeButton={false}
-                        render={
-                          <a href={viewingFileUrl} target="_blank" rel="noopener noreferrer">
-                            Buka PDF di Tab Baru
-                          </a>
-                        }
-                      />
-                    </div>
-                  </object>
-                </div>
-              ) : (
-                <img 
-                  src={viewingFileUrl} 
-                  alt="Preview" 
-                  className="max-w-full max-h-full object-contain rounded shadow-sm"
-                  referrerPolicy="no-referrer"
-                />
-              )
-            ) : (
-              <p className="text-muted-foreground">Gagal memuat berkas.</p>
-            )}
-          </div>
-          <DialogFooter className="p-4 border-t bg-white">
-            <DialogClose 
-              nativeButton={true}
-              render={<Button variant="outline" />}
-            >
-              Tutup
-            </DialogClose>
-            <Button 
-              nativeButton={false}
-              render={<a href={viewingFileUrl || '#'} download={viewingFileName || 'berkas-skp'} />}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Unduh Berkas
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Team Dialog */}
       <Dialog open={isEditTeamDialogOpen} onOpenChange={(open) => {
         setIsEditTeamDialogOpen(open);
         if (!open) setEditingTeam(null);
@@ -3599,6 +3404,14 @@ export default function App() {
         >
           <LayoutDashboard className="h-5 w-5" />
           <span className="text-[10px] font-bold">PLT/PLH</span>
+        </Button>
+        <Button 
+          variant="ghost" 
+          className={cn("flex flex-col items-center gap-1 h-auto py-1 px-0 flex-1", activeTab === 'arsip' ? "text-primary" : "text-muted-foreground")}
+          onClick={() => setActiveTab('arsip')}
+        >
+          <Archive className="h-5 w-5" />
+          <span className="text-[10px] font-bold">Arsip</span>
         </Button>
       </div>
     </div>
