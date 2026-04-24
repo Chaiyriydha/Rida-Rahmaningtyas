@@ -18,6 +18,7 @@ service cloud.firestore {
     //   - nip: string (required)
     //   - namaPegawai: string (required)
     //   - authorUid: string (required, immutable)
+    //   - pegawaiDigantikan: string (optional)
     //   - status: string (required, enum: ["Aktif", "Selesai"])
     //
     // Collection: work_teams

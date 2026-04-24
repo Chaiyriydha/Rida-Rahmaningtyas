@@ -182,6 +182,8 @@ export const UNIT_KERJA_LIST = [
   'BBSPJIKB',
   'BBSPJPPI',
   'BBSPJIHPMM',
+  'BBSPJIKMN',
+  'BBSPJIT',
   'BSPJI Banda Aceh',
   'BSPJI Medan',
   'BSPJI Padang',

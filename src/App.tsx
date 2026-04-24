@@ -195,6 +195,7 @@ export default function App() {
   const [isEditMemberDialogOpen, setIsEditMemberDialogOpen] = useState(false);
   const [selectedTeamForMember, setSelectedTeamForMember] = useState<string | null>(null);
   const [editingMemberInfo, setEditingMemberInfo] = useState<{ teamId: string, member: TeamMember, index: number } | null>(null);
+  const [pendingSubTeams, setPendingSubTeams] = useState<{ namaTim: string, ketua: TeamMember, anggota: TeamMember[] }[]>([]);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'PLT' | 'PLH' | 'TIM' } | null>(null);
   const [viewingFileUrl, setViewingFileUrl] = useState<string | null>(null);
@@ -525,6 +526,7 @@ export default function App() {
         ...(type === 'PLH' && { tglSelesai: formData.get('tglSelesai') as string }),
         status: 'Aktif' as PLTStatus,
         keterangan: formData.get('keterangan') as string,
+        pegawaiDigantikan: formData.get('pegawaiDigantikan') as string,
         authorUid: user.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -608,6 +610,7 @@ export default function App() {
         ...(type === 'PLH' && { tglSelesai: formData.get('tglSelesai') as string }),
         status: formData.get('status') as PLTStatus,
         keterangan: formData.get('keterangan') as string,
+        pegawaiDigantikan: formData.get('pegawaiDigantikan') as string,
         updatedAt: serverTimestamp(),
       };
 
@@ -654,9 +657,30 @@ export default function App() {
         updatedAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, 'work_teams'), newTeam);
+      const docRef = await addDoc(collection(db, 'work_teams'), newTeam);
+      
+      // If Bagian, also add sub-teams
+      if (jenis === 'Bagian' && pendingSubTeams.length > 0) {
+        for (const sub of pendingSubTeams) {
+          await addDoc(collection(db, 'work_teams'), {
+            namaTim: sub.namaTim,
+            unitKerja,
+            tahun,
+            status: 'Aktif',
+            jenis: 'Tim Kerja',
+            parentId: docRef.id,
+            ketua: sub.ketua,
+            anggota: sub.anggota,
+            authorUid: user.uid,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+
+      setPendingSubTeams([]);
       setIsAddTeamDialogOpen(false);
-      toast.success('Tim Kerja berhasil ditambahkan');
+      toast.success(jenis === 'Bagian' ? 'Bagian dan Tim Kerja berhasil ditambahkan' : 'Tim Kerja berhasil ditambahkan');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'work_teams');
     }
@@ -752,6 +776,47 @@ export default function App() {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `work_teams/${teamId}`);
     }
+  };
+
+  const addPendingSubTeam = () => {
+    setPendingSubTeams([...pendingSubTeams, { 
+      namaTim: '', 
+      ketua: { nama: '', jabatan: '', status: 'PNS' }, 
+      anggota: [] 
+    }]);
+  };
+
+  const removePendingSubTeam = (index: number) => {
+    setPendingSubTeams(pendingSubTeams.filter((_, i) => i !== index));
+  };
+
+  const updatePendingSubTeam = (index: number, field: string, value: any) => {
+    const newSubTeams = [...pendingSubTeams];
+    if (field.startsWith('ketua.')) {
+      const subField = field.split('.')[1] as keyof TeamMember;
+      newSubTeams[index].ketua[subField] = value;
+    } else {
+      (newSubTeams[index] as any)[field] = value;
+    }
+    setPendingSubTeams(newSubTeams);
+  };
+
+  const addMemberToPendingSubTeam = (subTeamIndex: number) => {
+    const newSubTeams = [...pendingSubTeams];
+    newSubTeams[subTeamIndex].anggota.push({ nama: '', jabatan: '', status: 'PNS' });
+    setPendingSubTeams(newSubTeams);
+  };
+
+  const removeMemberFromPendingSubTeam = (subTeamIndex: number, memberIndex: number) => {
+    const newSubTeams = [...pendingSubTeams];
+    newSubTeams[subTeamIndex].anggota = newSubTeams[subTeamIndex].anggota.filter((_, i) => i !== memberIndex);
+    setPendingSubTeams(newSubTeams);
+  };
+
+  const updateMemberInPendingSubTeam = (subTeamIndex: number, memberIndex: number, field: keyof TeamMember, value: string) => {
+    const newSubTeams = [...pendingSubTeams];
+    newSubTeams[subTeamIndex].anggota[memberIndex][field] = value;
+    setPendingSubTeams(newSubTeams);
   };
 
   const handleTakeSKP = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -1171,7 +1236,13 @@ export default function App() {
 
             <div className="flex items-center gap-3">
               {user && activeTab === 'tim-kerja' && (
-                <Dialog open={isAddTeamDialogOpen} onOpenChange={setIsAddTeamDialogOpen}>
+                <Dialog open={isAddTeamDialogOpen} onOpenChange={(open) => {
+                  setIsAddTeamDialogOpen(open);
+                  if (!open) {
+                    setPendingSubTeams([]);
+                    setJenisAddTeam('Tim Kerja');
+                  }
+                }}>
                   <DialogTrigger 
                     nativeButton={true}
                     render={<Button size="sm" className="gap-2 h-9 shadow-sm" />}
@@ -1179,18 +1250,21 @@ export default function App() {
                     <Plus className="h-4 w-4" />
                     Tambah Tim Kerja
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-[500px]">
+                  <DialogContent className={cn("max-h-[90vh] overflow-y-auto", jenisAddTeam === 'Bagian' ? "sm:max-w-[700px]" : "sm:max-w-[500px]")}>
                     <form onSubmit={handleAddTeam}>
                       <DialogHeader>
-                        <DialogTitle>Tambah Tim Kerja Baru</DialogTitle>
+                        <DialogTitle>Tambah {jenisAddTeam === 'Bagian' ? 'Bagian' : 'Tim Kerja'} Baru</DialogTitle>
                         <DialogDescription>
-                          Buat tim kerja baru untuk monitoring penugasan.
+                          Buat {jenisAddTeam === 'Bagian' ? 'bagian unit kerja' : 'tim kerja'} baru untuk monitoring penugasan.
                         </DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
                         <div className="grid gap-2">
                           <Label htmlFor="jenis">Jenis</Label>
-                          <Select name="jenis" defaultValue="Tim Kerja" onValueChange={(v: any) => setJenisAddTeam(v)} required>
+                          <Select name="jenis" defaultValue="Tim Kerja" onValueChange={(v: any) => {
+                            setJenisAddTeam(v);
+                            if (v === 'Tim Kerja') setPendingSubTeams([]);
+                          }} required>
                             <SelectTrigger>
                               <SelectValue placeholder="Pilih Jenis" />
                             </SelectTrigger>
@@ -1239,19 +1313,20 @@ export default function App() {
                             <Input id="tahun" name="tahun" type="number" defaultValue={new Date().getFullYear()} required />
                           </div>
                         </div>
+
                         <div className="border-t pt-4 mt-2">
-                          <Label className="text-primary font-bold">Ketua Tim</Label>
+                          <Label className="text-primary font-bold">{jenisAddTeam === 'Bagian' ? 'Kepala Bagian' : 'Ketua Tim'}</Label>
                           <div className="grid gap-4 mt-2">
                             <div className="grid gap-2">
-                              <Label htmlFor="ketuaNama">Nama Ketua</Label>
-                              <Input id="ketuaNama" name="ketuaNama" placeholder="Nama lengkap ketua" required />
+                              <Label htmlFor="ketuaNama">Nama {jenisAddTeam === 'Bagian' ? 'Kepala' : 'Ketua'}</Label>
+                              <Input id="ketuaNama" name="ketuaNama" placeholder={`Nama lengkap ${jenisAddTeam === 'Bagian' ? 'kepala' : 'ketua'}`} required />
                             </div>
                             <div className="grid gap-2">
-                              <Label htmlFor="ketuaJabatan">Jabatan Ketua</Label>
-                              <Input id="ketuaJabatan" name="ketuaJabatan" placeholder="Jabatan ketua" required />
+                              <Label htmlFor="ketuaJabatan">Jabatan {jenisAddTeam === 'Bagian' ? 'Kepala' : 'Ketua'}</Label>
+                              <Input id="ketuaJabatan" name="ketuaJabatan" placeholder="Jabatan" required />
                             </div>
                             <div className="grid gap-2">
-                              <Label htmlFor="ketuaStatus">Status Ketua</Label>
+                              <Label htmlFor="ketuaStatus">Status {jenisAddTeam === 'Bagian' ? 'Kepala' : 'Ketua'}</Label>
                               <Select name="ketuaStatus" required>
                                 <SelectTrigger>
                                   <SelectValue placeholder="Pilih Status" />
@@ -1265,13 +1340,158 @@ export default function App() {
                             </div>
                           </div>
                         </div>
+
+                        {jenisAddTeam === 'Bagian' && (
+                          <div className="border-t pt-4 mt-2">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex flex-col">
+                                <Label className="text-primary font-bold uppercase tracking-wider text-[10px]">Struktur Tim Kerja</Label>
+                                <span className="text-[10px] text-muted-foreground uppercase">Tambah tim di bawah bagian ini</span>
+                              </div>
+                              <Button type="button" variant="outline" size="sm" onClick={addPendingSubTeam} className="gap-1 h-8 text-[10px] font-bold">
+                                <Plus className="h-3.5 w-3.5" /> TAMBAH TIM KERJA
+                              </Button>
+                            </div>
+                            
+                            <div className="space-y-4">
+                              {pendingSubTeams.length === 0 && (
+                                <div className="text-center py-8 border border-dashed rounded-lg text-muted-foreground text-[10px] uppercase font-medium bg-muted/5">
+                                  Belum ada tim kerja ditambahkan
+                                </div>
+                              )}
+                              {pendingSubTeams.map((sub, sIndex) => (
+                                <Card key={sIndex} className="p-4 border-dashed relative shadow-none border-primary/20">
+                                  <Button 
+                                    type="button" 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className="absolute top-2 right-2 h-7 w-7 text-muted-foreground hover:text-destructive"
+                                    onClick={() => removePendingSubTeam(sIndex)}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                  
+                                  <div className="grid gap-4">
+                                    <div className="grid gap-2">
+                                      <Label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Nama Tim Kerja</Label>
+                                      <Input 
+                                        placeholder="Contoh: Tim Kerja Monitoring" 
+                                        className="h-9 text-sm focus-visible:ring-primary"
+                                        value={sub.namaTim}
+                                        onChange={(e) => updatePendingSubTeam(sIndex, 'namaTim', e.target.value)}
+                                      />
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                      <div className="grid gap-2">
+                                        <Label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Kepala / Ketua Tim</Label>
+                                        <Input 
+                                          placeholder="Nama Lengkap" 
+                                          className="h-9 text-sm"
+                                          value={sub.ketua.nama}
+                                          onChange={(e) => updatePendingSubTeam(sIndex, 'ketua.nama', e.target.value)}
+                                        />
+                                      </div>
+                                      <div className="grid gap-2">
+                                        <Label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Jabatan</Label>
+                                        <Input 
+                                          placeholder="Contoh: Ketua Tim Kerja" 
+                                          className="h-9 text-sm"
+                                          value={sub.ketua.jabatan}
+                                          onChange={(e) => updatePendingSubTeam(sIndex, 'ketua.jabatan', e.target.value)}
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div className="grid gap-2">
+                                      <Label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Status Kepegawaian Ketua</Label>
+                                      <Select 
+                                        value={sub.ketua.status}
+                                        onValueChange={(v: any) => updatePendingSubTeam(sIndex, 'ketua.status', v)}
+                                      >
+                                        <SelectTrigger className="h-9 text-sm">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {STATUS_PEGAWAI_LIST.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    
+                                    <div className="border-t pt-4 mt-2">
+                                      <div className="flex items-center justify-between mb-3">
+                                        <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Anggota Tim ({sub.anggota.length})</span>
+                                        <Button type="button" variant="ghost" size="sm" onClick={() => addMemberToPendingSubTeam(sIndex)} className="h-7 text-[10px] px-2 font-bold text-primary hover:bg-primary/5">
+                                          + TAMBAH ANGGOTA
+                                        </Button>
+                                      </div>
+                                      
+                                      <div className="space-y-3">
+                                        {sub.anggota.map((member, mIndex) => (
+                                          <div key={mIndex} className="bg-muted/30 p-3 rounded border relative space-y-3">
+                                            <Button 
+                                              type="button" 
+                                              variant="ghost" 
+                                              size="icon" 
+                                              className="absolute top-1 right-1 h-6 w-6 text-muted-foreground hover:text-destructive"
+                                              onClick={() => removeMemberFromPendingSubTeam(sIndex, mIndex)}
+                                            >
+                                              <X className="h-3.5 w-3.5" />
+                                            </Button>
+                                            
+                                            <div className="grid gap-2">
+                                              <Label className="text-[9px] uppercase font-bold">Nama Anggota</Label>
+                                              <Input 
+                                                placeholder="Nama Lengkap" 
+                                                className="h-8 text-xs"
+                                                value={member.nama}
+                                                onChange={(e) => updateMemberInPendingSubTeam(sIndex, mIndex, 'nama', e.target.value)}
+                                              />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <div className="grid gap-2">
+                                                <Label className="text-[9px] uppercase font-bold">Jabatan dalam Tim</Label>
+                                                <Input 
+                                                  placeholder="Jabatan" 
+                                                  className="h-8 text-xs"
+                                                  value={member.jabatan}
+                                                  onChange={(e) => updateMemberInPendingSubTeam(sIndex, mIndex, 'jabatan', e.target.value)}
+                                                />
+                                              </div>
+                                              <div className="grid gap-2">
+                                                <Label className="text-[9px] uppercase font-bold">Status</Label>
+                                                <Select 
+                                                  value={member.status} 
+                                                  onValueChange={(v) => updateMemberInPendingSubTeam(sIndex, mIndex, 'status', v)}
+                                                >
+                                                  <SelectTrigger className="h-8 text-[10px]">
+                                                    <SelectValue />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    {STATUS_PEGAWAI_LIST.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                  </SelectContent>
+                                                </Select>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </Card>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <DialogFooter>
+                      <DialogFooter className="sticky bottom-0 bg-background pt-4 border-t z-10">
                         <DialogClose 
                           nativeButton={true}
                           render={<Button type="button" variant="outline">Batal</Button>} 
                         />
-                        <Button type="submit">Simpan Tim Kerja</Button>
+                        <Button type="submit" className="bg-primary hover:bg-primary/90 font-bold">
+                          SIMPAN {jenisAddTeam.toUpperCase()}
+                        </Button>
                       </DialogFooter>
                     </form>
                   </DialogContent>
@@ -1603,6 +1823,11 @@ export default function App() {
                           <div className="grid gap-2">
                             <Label htmlFor="noSk">Nomor SK</Label>
                             <Input id="noSk" name="noSk" placeholder="Nomor Surat Keputusan" required />
+                          </div>
+
+                          <div className="grid gap-2">
+                            <Label htmlFor="pegawaiDigantikan">Pegawai Asli / Sebelumnya yang Menjabat</Label>
+                            <Input id="pegawaiDigantikan" name="pegawaiDigantikan" placeholder="Contoh: Budi Santoso (Pegawai yang digantikan)" />
                           </div>
 
                           <div className="grid gap-2">
@@ -2381,6 +2606,9 @@ export default function App() {
                                 <span className="font-semibold text-sm">{record.namaPegawai}</span>
                                 <span className="text-[10px] text-muted-foreground font-mono">{record.nip}</span>
                                 <span className="text-[10px] text-muted-foreground italic">Asli: {record.jabatanAsli}</span>
+                                {record.pegawaiDigantikan && (
+                                  <span className="text-[10px] text-primary italic font-medium">Gantikan: {record.pegawaiDigantikan}</span>
+                                )}
                               </div>
                             </TableCell>
                             <TableCell>
@@ -2535,6 +2763,9 @@ export default function App() {
                                 <span className="font-semibold text-sm">{record.namaPegawai}</span>
                                 <span className="text-[10px] text-muted-foreground font-mono">{record.nip}</span>
                                 <span className="text-[10px] text-muted-foreground italic">Asli: {record.jabatanAsli}</span>
+                                {record.pegawaiDigantikan && (
+                                  <span className="text-[10px] text-blue-600 italic font-medium">Gantikan: {record.pegawaiDigantikan}</span>
+                                )}
                               </div>
                             </TableCell>
                             <TableCell>
@@ -2729,6 +2960,16 @@ export default function App() {
                     name="noSk" 
                     defaultValue={editingPltRecord?.noSk || editingPlhRecord?.noSk} 
                     required 
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-pegawaiDigantikan">Pegawai Asli / Sebelumnya yang Menjabat</Label>
+                  <Input 
+                    id="edit-pegawaiDigantikan" 
+                    name="edit-pegawaiDigantikan" 
+                    defaultValue={editingPltRecord?.pegawaiDigantikan || editingPlhRecord?.pegawaiDigantikan} 
+                    placeholder="Nama pegawai asli"
                   />
                 </div>
 

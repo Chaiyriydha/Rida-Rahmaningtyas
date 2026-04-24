@@ -43,6 +43,7 @@ export interface PLTRecord {
   tglSelesai?: string;
   status: PLTStatus;
   keterangan?: string;
+  pegawaiDigantikan?: string;
 }
 
 export interface PLHRecord {
@@ -58,6 +59,7 @@ export interface PLHRecord {
   tglSelesai: string;
   status: PLTStatus;
   keterangan?: string;
+  pegawaiDigantikan?: string;
 }
 
 export interface TeamMember {

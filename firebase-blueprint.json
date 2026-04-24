@@ -44,6 +44,7 @@
         "tmtMulai": { "type": "string" },
         "tmtSelesai": { "type": "string" },
         "status": { "type": "string", "enum": ["Aktif", "Selesai"] },
+        "pegawaiDigantikan": { "type": "string" },
         "authorUid": { "type": "string" }
       },
       "required": ["nip", "namaPegawai", "jabatanPlt", "unitKerja", "status", "authorUid"]
@@ -63,6 +64,7 @@
         "tmtMulai": { "type": "string" },
         "tmtSelesai": { "type": "string" },
         "status": { "type": "string", "enum": ["Aktif", "Selesai"] },
+        "pegawaiDigantikan": { "type": "string" },
         "authorUid": { "type": "string" }
       },
       "required": ["nip", "namaPegawai", "jabatanPlh", "unitKerja", "status", "authorUid"]
