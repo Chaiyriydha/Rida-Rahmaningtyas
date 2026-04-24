@@ -1092,14 +1092,9 @@ export default function App() {
       <aside className="hidden md:flex w-64 flex-col border-r bg-white sticky top-0 h-screen">
         <div className="p-6 flex flex-col gap-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-14 w-auto items-center justify-center border-r pr-3 border-muted-foreground/20">
-              <span className="text-4xl font-black tracking-tighter text-[#1A4A9A]">BSKJI</span>
-            </div>
-            <div className="flex flex-col justify-center">
-              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Badan</p>
-              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Standardisasi dan</p>
-              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Kebijakan</p>
-              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Jasa Industri</p>
+            <div className="flex flex-col justify-center border-l pl-3 border-muted-foreground/20">
+              <h1 className="text-sm font-black tracking-tight text-[#1A4A9A] leading-none uppercase">Monitoring Organisasi</h1>
+              <p className="text-[12px] font-bold text-[#EAB308] mt-1">BSKJI</p>
             </div>
           </div>
 
@@ -1181,13 +1176,10 @@ export default function App() {
         {/* Header */}
         <header className="sticky top-0 z-40 w-full border-b bg-white/80 backdrop-blur-md h-16 flex items-center shrink-0">
           <div className="container mx-auto flex items-center justify-between px-4 md:px-8">
-            <div className="md:hidden flex items-center gap-2">
-              <span className="text-2xl font-black tracking-tighter text-[#1A4A9A]">BSKJI</span>
-              <div className="h-6 w-[1px] bg-muted-foreground/20 mx-1" />
-              <div className="flex flex-col">
-                <p className="text-[7px] font-bold text-[#1A4A9A] leading-none uppercase">Badan Standardisasi dan</p>
-                <p className="text-[7px] font-bold text-[#1A4A9A] leading-none uppercase">Kebijakan Jasa Industri</p>
-              </div>
+            <div className="md:hidden flex items-center gap-2 text-[#1A4A9A]">
+              <span className="text-xl font-black tracking-tighter">BSKJI</span>
+              <div className="h-5 w-[1px] bg-muted-foreground/20 mx-1" />
+              <h1 className="text-[10px] font-bold uppercase tracking-tight">Monitoring Organisasi</h1>
             </div>
 
             <div className="hidden md:block">
