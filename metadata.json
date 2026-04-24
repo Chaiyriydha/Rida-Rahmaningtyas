@@ -1,5 +1,5 @@
 {
-  "name": "Monitoring Organisasi BSKJI",
-  "description": "Dashboard monitoring Tim Kerja, SKP Pegawai, Penugasan PLT/PLH, dan Arsip Dokumen BSKJI",
+  "name": "Dashboard SKP Tracker",
+  "description": "Dashboard monitoring Sasaran Kinerja Pegawai (SKP) dengan pelacakan pengambilan berkas, unit kerja, dan tanggal.",
   "requestFramePermissions": []
 }

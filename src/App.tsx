@@ -488,6 +488,7 @@ export default function App() {
         unitKerja: formData.get('unitKerja') as string,
         unitKerjaTugas: formData.get('unitKerjaTugas') as string,
         noSk: formData.get('noSk') as string,
+        tanggalSurat: formData.get('tanggalSurat') as string,
         tglMulai: formData.get('tglMulai') as string,
         ...(type === 'PLH' && { tglSelesai: formData.get('tglSelesai') as string }),
         status: 'Aktif' as PLTStatus,
@@ -557,6 +558,7 @@ export default function App() {
         unitKerja: formData.get('unitKerja') as string,
         unitKerjaTugas: formData.get('unitKerjaTugas') as string,
         noSk: formData.get('noSk') as string,
+        tanggalSurat: formData.get('tanggalSurat') as string,
         tglMulai: formData.get('tglMulai') as string,
         ...(type === 'PLH' && { tglSelesai: formData.get('tglSelesai') as string }),
         status: formData.get('status') as PLTStatus,
@@ -905,6 +907,7 @@ export default function App() {
         'Unit Kerja Asal': record.unitKerja,
         'Unit Kerja Penugasan': record.unitKerjaTugas,
         'Nomor SK': record.noSk,
+        'Tanggal Surat': record.tanggalSurat ? format(new Date(record.tanggalSurat), 'dd MMMM yyyy', { locale: id }) : '-',
         'Alasan/Keterangan': record.keterangan || '-',
         'Tanggal Mulai': format(new Date(record.tglMulai), 'dd MMMM yyyy', { locale: id }),
         'Tanggal Selesai': record.tglSelesai ? format(new Date(record.tglSelesai), 'dd MMMM yyyy', { locale: id }) : 'Selesai',
@@ -929,6 +932,7 @@ export default function App() {
         'Unit Kerja Asal': record.unitKerja,
         'Unit Kerja Penugasan': record.unitKerjaTugas,
         'Nomor SK': record.noSk,
+        'Tanggal Surat': record.tanggalSurat ? format(new Date(record.tanggalSurat), 'dd MMMM yyyy', { locale: id }) : '-',
         'Alasan/Keterangan': record.keterangan || '-',
         'Tanggal Mulai': format(new Date(record.tglMulai), 'dd MMMM yyyy', { locale: id }),
         'Tanggal Selesai': format(new Date(record.tglSelesai), 'dd MMMM yyyy', { locale: id }),
@@ -1092,9 +1096,14 @@ export default function App() {
       <aside className="hidden md:flex w-64 flex-col border-r bg-white sticky top-0 h-screen">
         <div className="p-6 flex flex-col gap-8">
           <div className="flex items-center gap-3">
-            <div className="flex flex-col justify-center border-l pl-3 border-muted-foreground/20">
-              <h1 className="text-sm font-black tracking-tight text-[#1A4A9A] leading-none uppercase">Monitoring Organisasi</h1>
-              <p className="text-[12px] font-bold text-[#EAB308] mt-1">BSKJI</p>
+            <div className="flex h-14 w-auto items-center justify-center border-r pr-3 border-muted-foreground/20">
+              <span className="text-4xl font-black tracking-tighter text-[#1A4A9A]">BSKJI</span>
+            </div>
+            <div className="flex flex-col justify-center">
+              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Badan</p>
+              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Standardisasi dan</p>
+              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Kebijakan</p>
+              <p className="text-[8px] font-bold text-[#1A4A9A] leading-tight uppercase">Jasa Industri</p>
             </div>
           </div>
 
@@ -1176,10 +1185,13 @@ export default function App() {
         {/* Header */}
         <header className="sticky top-0 z-40 w-full border-b bg-white/80 backdrop-blur-md h-16 flex items-center shrink-0">
           <div className="container mx-auto flex items-center justify-between px-4 md:px-8">
-            <div className="md:hidden flex items-center gap-2 text-[#1A4A9A]">
-              <span className="text-xl font-black tracking-tighter">BSKJI</span>
-              <div className="h-5 w-[1px] bg-muted-foreground/20 mx-1" />
-              <h1 className="text-[10px] font-bold uppercase tracking-tight">Monitoring Organisasi</h1>
+            <div className="md:hidden flex items-center gap-2">
+              <span className="text-2xl font-black tracking-tighter text-[#1A4A9A]">BSKJI</span>
+              <div className="h-6 w-[1px] bg-muted-foreground/20 mx-1" />
+              <div className="flex flex-col">
+                <p className="text-[7px] font-bold text-[#1A4A9A] leading-none uppercase">Badan Standardisasi dan</p>
+                <p className="text-[7px] font-bold text-[#1A4A9A] leading-none uppercase">Kebijakan Jasa Industri</p>
+              </div>
             </div>
 
             <div className="hidden md:block">
@@ -1708,9 +1720,15 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="grid gap-2">
-                            <Label htmlFor="noSk">Nomor SK</Label>
-                            <Input id="noSk" name="noSk" placeholder="Nomor Surat Keputusan" required />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label htmlFor="noSk">Nomor SK</Label>
+                              <Input id="noSk" name="noSk" placeholder="Nomor Surat Keputusan" required />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="tanggalSurat">Tanggal Surat</Label>
+                              <Input id="tanggalSurat" name="tanggalSurat" type="date" required />
+                            </div>
                           </div>
 
                           <div className="grid gap-2">
@@ -2430,6 +2448,9 @@ export default function App() {
                               <div className="flex flex-col">
                                 <span className="font-medium text-sm text-primary">{record.jabatanPlt}</span>
                                 <span className="text-[10px] text-muted-foreground font-medium">SK: {record.noSk}</span>
+                                {record.tanggalSurat && (
+                                  <span className="text-[10px] text-muted-foreground font-medium">Tgl Surat: {format(new Date(record.tanggalSurat), 'dd MMM yyyy')}</span>
+                                )}
                                 {record.keterangan && (
                                   <span className="text-[10px] text-muted-foreground mt-1 bg-muted/50 px-1.5 py-0.5 rounded border border-muted-foreground/10">
                                     Ket: {record.keterangan}
@@ -2587,6 +2608,9 @@ export default function App() {
                               <div className="flex flex-col">
                                 <span className="font-medium text-sm text-blue-600">{record.jabatanPlh}</span>
                                 <span className="text-[10px] text-muted-foreground font-medium">SK: {record.noSk}</span>
+                                {record.tanggalSurat && (
+                                  <span className="text-[10px] text-muted-foreground font-medium">Tgl Surat: {format(new Date(record.tanggalSurat), 'dd MMM yyyy')}</span>
+                                )}
                                 {record.keterangan && (
                                   <span className="text-[10px] text-muted-foreground mt-1 bg-muted/50 px-1.5 py-0.5 rounded border border-muted-foreground/10">
                                     Ket: {record.keterangan}
@@ -2854,14 +2878,26 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-noSk">Nomor SK</Label>
-                  <Input 
-                    id="edit-noSk" 
-                    name="noSk" 
-                    defaultValue={editingPltRecord?.noSk || editingPlhRecord?.noSk} 
-                    required 
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-noSk">Nomor SK</Label>
+                    <Input 
+                      id="edit-noSk" 
+                      name="noSk" 
+                      defaultValue={editingPltRecord?.noSk || editingPlhRecord?.noSk} 
+                      required 
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-tanggalSurat">Tanggal Surat</Label>
+                    <Input 
+                      id="edit-tanggalSurat" 
+                      name="tanggalSurat" 
+                      type="date"
+                      defaultValue={editingPltRecord?.tanggalSurat || editingPlhRecord?.tanggalSurat} 
+                      required 
+                    />
+                  </div>
                 </div>
 
                 <div className="grid gap-2">

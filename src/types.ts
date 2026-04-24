@@ -41,6 +41,7 @@ export interface PLTRecord {
   noSk: string;
   tglMulai: string;
   tglSelesai?: string;
+  tanggalSurat?: string;
   status: PLTStatus;
   keterangan?: string;
   pegawaiDigantikan?: string;
@@ -57,6 +58,7 @@ export interface PLHRecord {
   noSk: string;
   tglMulai: string;
   tglSelesai: string;
+  tanggalSurat?: string;
   status: PLTStatus;
   keterangan?: string;
   pegawaiDigantikan?: string;
