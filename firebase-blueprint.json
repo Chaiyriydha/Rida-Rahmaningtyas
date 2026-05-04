@@ -29,6 +29,27 @@
       },
       "required": ["nip", "namaPegawai", "jabatan", "unitKerja", "tahun", "periode", "status", "authorUid"]
     },
+    "SKPMonitoringRecord": {
+      "title": "SKP Monitoring Record",
+      "description": "Assessment data for SKP (Sasaran Kinerja Pegawai) monitoring",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nip": { "type": "string" },
+        "namaPegawai": { "type": "string" },
+        "jabatan": { "type": "string" },
+        "unitKerja": { "type": "string" },
+        "tahun": { "type": "number" },
+        "periode": { "type": "string", "enum": ["Tahunan", "Triwulan I", "Triwulan II", "Triwulan III", "Triwulan IV"] },
+        "ratingHasilKerja": { "type": "string", "null": true },
+        "ratingHasilPerilaku": { "type": "string", "null": true },
+        "predikatKinerja": { "type": "string", "null": true },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "authorUid": { "type": "string" }
+      },
+      "required": ["nip", "namaPegawai", "jabatan", "unitKerja", "tahun", "periode", "authorUid"]
+    },
     "PLTRecord": {
       "title": "PLT Record",
       "description": "Monitoring data for PLT (Pelaksana Tugas)",
@@ -105,12 +126,46 @@
         }
       },
       "required": ["namaTim", "unitKerja", "tahun", "status", "authorUid", "ketua"]
+    },
+    "OrgNode": {
+      "title": "Organization Node",
+      "description": "Formal organizational structure node",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "namaJabatan": { "type": "string" },
+        "namaPegawai": { "type": "string" },
+        "nip": { "type": "string" },
+        "parentId": { "type": "string" },
+        "order": { "type": "number" },
+        "authorUid": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["namaJabatan", "namaPegawai", "authorUid"]
+    },
+    "UnitInfo": {
+      "title": "Unit Info",
+      "description": "SK information for a Unit Kerja",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "unitKerja": { "type": "string" },
+        "nomorSK": { "type": "string" },
+        "tanggalSK": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "authorUid": { "type": "string" }
+      },
+      "required": ["unitKerja", "authorUid"]
     }
   },
   "firestore": {
     "/skp_records/{recordId}": {
       "schema": "SKPRecord",
       "description": "Collection of SKP monitoring records"
+    },
+    "/skp_monitoring_records/{recordId}": {
+      "schema": "SKPMonitoringRecord",
+      "description": "Collection of SKP monitoring assessments"
     },
     "/plt_records/{recordId}": {
       "schema": "PLTRecord",
@@ -123,6 +178,14 @@
     "/work_teams/{teamId}": {
       "schema": "WorkTeam",
       "description": "Collection of Work Team monitoring records"
+    },
+    "/unit_info/{unitId}": {
+      "schema": "UnitInfo",
+      "description": "Collection of SK information for Unit Kerja"
+    },
+    "/org_structure/{nodeId}": {
+      "schema": "OrgNode",
+      "description": "Collection of formal organizational structure nodes"
     }
   }
 }

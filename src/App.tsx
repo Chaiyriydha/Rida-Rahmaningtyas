@@ -4,7 +4,7 @@
  */
 
 import * as React from 'react';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { 
   Search, 
   Plus, 
@@ -14,12 +14,15 @@ import {
   LayoutDashboard,
   Filter,
   Download,
+  Upload,
   MoreVertical,
   CheckCircle2,
   XCircle,
-  Calendar as CalendarIcon,
+  Calendar,
+  Briefcase,
   Building2,
   ArrowRight,
+  ArrowLeft,
   User,
   FileText,
   X,
@@ -30,7 +33,11 @@ import {
   AlertTriangle,
   Pencil,
   Archive,
-  ExternalLink
+  ExternalLink,
+  Network,
+  Trash2,
+  TrendingUp,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -90,7 +97,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 
-import { SKPRecord, SKPStatus, SKPPeriode, PLTRecord, PLHRecord, PLTStatus, WorkTeam, TeamMember } from './types';
+import { SKPRecord, SKPMonitoringRecord, SKPStatus, SKPPeriode, PLTRecord, PLHRecord, PLTStatus, WorkTeam, TeamMember, UnitInfo, OrgNode } from './types';
 
 enum OperationType {
   CREATE = 'create',
@@ -141,15 +148,132 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 
+function OrgNodeCard({ node, allNodes, onAddSub, onEdit, onDelete }: { 
+  node: OrgNode, 
+  allNodes: OrgNode[], 
+  onAddSub: (id: string) => void,
+  onEdit: (node: OrgNode) => void,
+  onDelete: (id: string) => void
+}) {
+  const children = allNodes.filter(n => n.parentId === node.id);
+  const isRoot = !node.parentId;
+
+  return (
+    <div className="flex flex-col items-center relative">
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="z-10 group relative"
+      >
+        <Card className={cn(
+          "p-4 text-center min-w-[240px] shadow-lg border-none transition-all hover:ring-2 hover:ring-primary/20",
+          isRoot ? "bg-[#1A4A9A] text-white" : "bg-white border-primary/20 shadow-primary/5"
+        )}>
+          <div className="flex flex-col items-center">
+            <Badge className={cn(
+              "text-[8px] font-black uppercase tracking-[0.2em] mb-2 px-2 py-0.5",
+              isRoot ? "bg-white/10 text-white" : "bg-primary/5 text-primary"
+            )}>
+              {isRoot ? 'Puncak Struktur' : 'Jabatan Struktural'}
+            </Badge>
+            <h4 className={cn("font-black text-xs uppercase tracking-tight leading-tight", !isRoot && "text-[#1A4A9A]")}>
+              {node.namaJabatan}
+            </h4>
+            <div className={cn("mt-3 pt-3 border-t w-full", isRoot ? "border-white/10" : "border-primary/10")}>
+              <p className={cn("text-[10px] font-bold italic", isRoot ? "text-white/90" : "text-primary/70")}>
+                {node.namaPegawai}
+              </p>
+              <p className={cn("text-[8px] font-medium mt-1", isRoot ? "text-white/60" : "text-muted-foreground")}>
+                NIP. {node.nip || '-'}
+              </p>
+            </div>
+          </div>
+
+          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className={cn("h-6 w-6 rounded-md", isRoot ? "hover:bg-white/10 text-white/50 hover:text-white" : "hover:bg-primary/5 text-muted-foreground hover:text-primary")}
+              onClick={() => onEdit(node)}
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className={cn("h-6 w-6 rounded-md", isRoot ? "hover:bg-red-500/20 text-white/50 hover:text-red-200" : "hover:bg-red-50 text-muted-foreground hover:text-red-500")}
+              onClick={() => onDelete(node.id)}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "w-full h-7 mt-3 text-[8px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all",
+              isRoot ? "hover:bg-white/10 text-white/60 hover:text-white" : "hover:bg-primary/5 text-primary/60 hover:text-primary"
+            )}
+            onClick={() => onAddSub(node.id)}
+          >
+            + TAMBAH SUB-JABATAN
+          </Button>
+        </Card>
+        
+        {children.length > 0 && (
+          <div className="absolute left-1/2 -bottom-10 w-0.5 h-10 bg-border -translate-x-1/2" />
+        )}
+      </motion.div>
+
+      {children.length > 0 && (
+        <div className="mt-10 flex justify-center items-start gap-8 relative pt-10">
+          {children.length > 1 && (
+            <div className="absolute top-0 left-[20%] right-[20%] h-0.5 bg-border rounded-full" />
+          )}
+          {children.map(child => (
+            <div key={child.id} className="relative flex flex-col items-center">
+              <div className="absolute -top-10 left-1/2 w-0.5 h-10 bg-border -translate-x-1/2" />
+              <OrgNodeCard 
+                node={child} 
+                allNodes={allNodes} 
+                onAddSub={onAddSub} 
+                onEdit={onEdit} 
+                onDelete={onDelete} 
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'tim-kerja' | 'skp' | 'plt-plh' | 'arsip'>('tim-kerja');
+  const [activeTab, setActiveTab] = useState<'struktur-organisasi' | 'tim-kerja' | 'skp' | 'skp-monitoring' | 'plt-plh' | 'arsip'>('tim-kerja');
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [records, setRecords] = useState<SKPRecord[]>([]);
+  const [monitoringRecords, setMonitoringRecords] = useState<SKPMonitoringRecord[]>([]);
   const [pltRecords, setPltRecords] = useState<PLTRecord[]>([]);
   const [plhRecords, setPlhRecords] = useState<PLHRecord[]>([]);
   const [workTeams, setWorkTeams] = useState<WorkTeam[]>([]);
+  const [unitInfoList, setUnitInfoList] = useState<UnitInfo[]>([]);
+  const [orgNodes, setOrgNodes] = useState<OrgNode[]>([]);
+  const [isEditingUnitSK, setIsEditingUnitSK] = useState(false);
+  const [isAddOrgNodeDialogOpen, setIsAddOrgNodeDialogOpen] = useState(false);
+  const [isEditOrgNodeDialogOpen, setIsEditOrgNodeDialogOpen] = useState(false);
+  const [editingOrgNode, setEditingOrgNode] = useState<OrgNode | null>(null);
+  const [parentOrgNodeId, setParentOrgNodeId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [isImportingMonitoring, setIsImportingMonitoring] = useState(false);
+  const [isImportingTeams, setIsImportingTeams] = useState(false);
+  const [isImportingPltPlh, setIsImportingPltPlh] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const monitoringFileInputRef = useRef<HTMLInputElement>(null);
+  const teamsFileInputRef = useRef<HTMLInputElement>(null);
+  const pltPlhFileInputRef = useRef<HTMLInputElement>(null);
 
   const groupedTeams = useMemo(() => {
     const groups: Record<string, { topLevel: WorkTeam[], subTeams: Record<string, WorkTeam[]> }> = {};
@@ -175,12 +299,15 @@ export default function App() {
   const [yearFilterPltPlh, setYearFilterPltPlh] = useState<string>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isAddPltPlhDialogOpen, setIsAddPltPlhDialogOpen] = useState(false);
+  const [isAddMonitoringDialogOpen, setIsAddMonitoringDialogOpen] = useState(false);
   const [isTakeDialogOpen, setIsTakeDialogOpen] = useState(false);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isEditMonitoringDialogOpen, setIsEditMonitoringDialogOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<SKPRecord | null>(null);
   const [detailRecord, setDetailRecord] = useState<SKPRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<SKPRecord | null>(null);
+  const [editingMonitoringRecord, setEditingMonitoringRecord] = useState<SKPMonitoringRecord | null>(null);
   const [editingPltRecord, setEditingPltRecord] = useState<PLTRecord | null>(null);
   const [editingPlhRecord, setEditingPlhRecord] = useState<PLHRecord | null>(null);
   const [pltPlhType, setPltPlhType] = useState<'PLT' | 'PLH'>('PLT');
@@ -196,7 +323,10 @@ export default function App() {
   const [editingMemberInfo, setEditingMemberInfo] = useState<{ teamId: string, member: TeamMember, index: number } | null>(null);
   const [pendingSubTeams, setPendingSubTeams] = useState<{ namaTim: string, ketua: TeamMember, anggota: TeamMember[] }[]>([]);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'PLT' | 'PLH' | 'TIM' } | null>(null);
+  const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'SKP_MONITORING' | 'PLT' | 'PLH' | 'TIM' } | null>(null);
+  const [monitoringSelectedEmployee, setMonitoringSelectedEmployee] = useState<string | null>(null);
+  const [selectedUnitForTeams, setSelectedUnitForTeams] = useState<string | null>(null);
+  const [selectedTeamIdForDetails, setSelectedTeamIdForDetails] = useState<string | null>(null);
 
   // Auth Effect
   React.useEffect(() => {
@@ -225,6 +355,17 @@ export default function App() {
       setRecords(docs);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'skp_records');
+    });
+
+    const qMonitoring = query(collection(db, 'skp_monitoring_records'), orderBy('createdAt', 'desc'));
+    const unsubMonitoring = onSnapshot(qMonitoring, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as SKPMonitoringRecord[];
+      setMonitoringRecords(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'skp_monitoring_records');
     });
 
     const qPlt = query(collection(db, 'plt_records'), orderBy('status', 'asc'));
@@ -260,11 +401,36 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'work_teams');
     });
 
+    const qUnitInfo = query(collection(db, 'unit_info'));
+    const unsubUnitInfo = onSnapshot(qUnitInfo, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as UnitInfo[];
+      setUnitInfoList(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'unit_info');
+    });
+
+    const qOrgStructure = query(collection(db, 'org_structure'), orderBy('order', 'asc'));
+    const unsubOrgStructure = onSnapshot(qOrgStructure, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as OrgNode[];
+      setOrgNodes(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'org_structure');
+    });
+
     return () => {
       unsubSkp();
+      unsubMonitoring();
       unsubPlt();
       unsubPlh();
       unsubWorkTeams();
+      unsubUnitInfo();
+      unsubOrgStructure();
     };
   }, [user]);
 
@@ -357,6 +523,59 @@ export default function App() {
     const activePlh = plhRecords.filter(r => r.status === 'Aktif').length;
     return { totalPlt, totalPlh, activePlt, activePlh };
   }, [pltRecords, plhRecords]);
+
+  const skpMonitoringStats = useMemo(() => {
+    const total = monitoringRecords.length;
+    const sangatBaik = monitoringRecords.filter(r => r.predikatKinerja === 'Sangat Baik').length;
+    const baik = monitoringRecords.filter(r => r.predikatKinerja === 'Baik').length;
+    const butuhPerbaikan = monitoringRecords.filter(r => r.predikatKinerja === 'Butuh Perbaikan').length;
+    const kurus = monitoringRecords.filter(r => r.predikatKinerja === 'Kurang' || r.predikatKinerja === 'Sangat Kurang').length;
+    return { total, sangatBaik, baik, butuhPerbaikan, kurang: kurus };
+  }, [monitoringRecords]);
+
+  const uniqueEmployeesForMonitoring = useMemo(() => {
+    const employeeMap = new Map<string, { nip: string, namaPegawai: string, jabatan: string, unitKerja: string, latestPredikat?: string }>();
+    
+    // Sort records to get the latest info for each employee
+    const sortedRecords = [...monitoringRecords].sort((a, b) => {
+      if (b.tahun !== a.tahun) return b.tahun - a.tahun;
+      const periodOrder = { 'Tahunan': 5, 'Triwulan IV': 4, 'Triwulan III': 3, 'Triwulan II': 2, 'Triwulan I': 1 };
+      return (periodOrder[b.periode] || 0) - (periodOrder[a.periode] || 0);
+    });
+
+    sortedRecords.forEach(record => {
+      const key = record.nip || record.namaPegawai;
+      if (!employeeMap.has(key)) {
+        employeeMap.set(key, {
+          nip: record.nip,
+          namaPegawai: record.namaPegawai,
+          jabatan: record.jabatan,
+          unitKerja: record.unitKerja,
+          latestPredikat: record.predikatKinerja
+        });
+      }
+    });
+
+    const employees = Array.from(employeeMap.values());
+    
+    return employees.filter(emp => {
+      const search = searchQuery.toLowerCase();
+      return emp.namaPegawai.toLowerCase().includes(search) ||
+             emp.nip.includes(search) ||
+             emp.unitKerja.toLowerCase().includes(search);
+    });
+  }, [monitoringRecords, searchQuery]);
+
+  const selectedEmployeeHistory = useMemo(() => {
+    if (!monitoringSelectedEmployee) return [];
+    return monitoringRecords
+      .filter(r => (r.nip || r.namaPegawai) === monitoringSelectedEmployee)
+      .sort((a, b) => {
+        if (b.tahun !== a.tahun) return b.tahun - a.tahun;
+        const periodOrder = { 'Tahunan': 5, 'Triwulan IV': 4, 'Triwulan III': 3, 'Triwulan II': 2, 'Triwulan I': 1 };
+        return (periodOrder[b.periode] || 0) - (periodOrder[a.periode] || 0);
+      });
+  }, [monitoringRecords, monitoringSelectedEmployee]);
 
   const filteredPltRecords = useMemo(() => {
     return pltRecords.filter(record => {
@@ -455,9 +674,6 @@ export default function App() {
         periode: formData.get('periode') as SKPPeriode,
         jenisDokumen: selectedJenisDokumen,
         status: 'Belum Diambil' as SKPStatus,
-        ratingHasilKerja: formData.get('ratingHasilKerja') as string,
-        ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
-        predikatKinerja: formData.get('predikatKinerja') as string,
         authorUid: user.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -468,6 +684,36 @@ export default function App() {
       toast.success('Data SKP berhasil disimpan ke database');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'skp_records');
+    }
+  };
+
+  const handleAddMonitoringRecord = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user) return;
+
+    const formData = new FormData(e.currentTarget);
+    
+    try {
+      const newRecord = {
+        nip: formData.get('nip') as string,
+        namaPegawai: formData.get('namaPegawai') as string,
+        jabatan: formData.get('jabatan') as string,
+        unitKerja: formData.get('unitKerja') as string,
+        tahun: parseInt(formData.get('tahun') as string),
+        periode: formData.get('periode') as SKPPeriode,
+        ratingHasilKerja: formData.get('ratingHasilKerja') as string,
+        ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
+        predikatKinerja: formData.get('predikatKinerja') as string,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'skp_monitoring_records'), newRecord);
+      setIsAddMonitoringDialogOpen(false);
+      toast.success('Data Monitoring SKP berhasil disimpan');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'skp_monitoring_records');
     }
   };
 
@@ -523,9 +769,6 @@ export default function App() {
         tahun: parseInt(formData.get('tahun') as string),
         periode: formData.get('periode') as SKPPeriode,
         jenisDokumen: selectedJenisDokumen,
-        ratingHasilKerja: formData.get('ratingHasilKerja') as string,
-        ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
-        predikatKinerja: formData.get('predikatKinerja') as string,
         updatedAt: serverTimestamp(),
       };
 
@@ -535,6 +778,35 @@ export default function App() {
       toast.success('Data SKP berhasil diperbarui');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `skp_records/${editingRecord.id}`);
+    }
+  };
+
+  const handleUpdateMonitoringRecord = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingMonitoringRecord || !user) return;
+
+    const formData = new FormData(e.currentTarget);
+    
+    try {
+      const updatedData = {
+        nip: formData.get('nip') as string,
+        namaPegawai: formData.get('namaPegawai') as string,
+        jabatan: formData.get('jabatan') as string,
+        unitKerja: formData.get('unitKerja') as string,
+        tahun: parseInt(formData.get('tahun') as string),
+        periode: formData.get('periode') as SKPPeriode,
+        ratingHasilKerja: formData.get('ratingHasilKerja') as string,
+        ratingHasilPerilaku: formData.get('ratingHasilPerilaku') as string,
+        predikatKinerja: formData.get('predikatKinerja') as string,
+        updatedAt: serverTimestamp(),
+      };
+
+      await updateDoc(doc(db, 'skp_monitoring_records', editingMonitoringRecord.id), updatedData);
+      setIsEditMonitoringDialogOpen(false);
+      setEditingMonitoringRecord(null);
+      toast.success('Data Monitoring SKP berhasil diperbarui');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `skp_monitoring_records/${editingMonitoringRecord.id}`);
     }
   };
 
@@ -772,6 +1044,101 @@ export default function App() {
     setPendingSubTeams(newSubTeams);
   };
 
+  const handleAddOrgNode = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user) return;
+
+    const formData = new FormData(e.currentTarget);
+    const namaJabatan = formData.get('namaJabatan') as string;
+    const namaPegawai = formData.get('namaPegawai') as string;
+    const nip = formData.get('nip') as string;
+
+    try {
+      await addDoc(collection(db, 'org_structure'), {
+        namaJabatan,
+        namaPegawai,
+        nip,
+        parentId: parentOrgNodeId,
+        order: orgNodes.length,
+        authorUid: user.uid,
+        updatedAt: serverTimestamp()
+      });
+      setIsAddOrgNodeDialogOpen(false);
+      setParentOrgNodeId(null);
+      toast.success('Jabatan struktural berhasil ditambahkan');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'org_structure');
+    }
+  };
+
+  const handleUpdateOrgNode = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingOrgNode || !user) return;
+
+    const formData = new FormData(e.currentTarget);
+    const namaJabatan = formData.get('namaJabatan') as string;
+    const namaPegawai = formData.get('namaPegawai') as string;
+    const nip = formData.get('nip') as string;
+
+    try {
+      await updateDoc(doc(db, 'org_structure', editingOrgNode.id), {
+        namaJabatan,
+        namaPegawai,
+        nip,
+        updatedAt: serverTimestamp()
+      });
+      setIsEditOrgNodeDialogOpen(false);
+      setEditingOrgNode(null);
+      toast.success('Jabatan struktural berhasil diperbarui');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'org_structure');
+    }
+  };
+
+  const handleDeleteOrgNode = async (id: string) => {
+    if (!window.confirm('Hapus jabatan ini? Semua sub-jabatan di bawahnya harus dihapus manual atau dipindahkan.')) return;
+    try {
+      await deleteDoc(doc(db, 'org_structure', id));
+      toast.success('Jabatan struktural berhasil dihapus');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'org_structure');
+    }
+  };
+
+  const handleUpdateUnitSK = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedUnitForTeams || !user) return;
+
+    const formData = new FormData(e.currentTarget);
+    const nomorSK = formData.get('nomorSK') as string;
+    const tanggalSK = formData.get('tanggalSK') as string;
+
+    const existingInfo = unitInfoList.find(u => u.unitKerja === selectedUnitForTeams);
+
+    try {
+      if (existingInfo?.id) {
+        await updateDoc(doc(db, 'unit_info', existingInfo.id), {
+          nomorSK: nomorSK || '',
+          tanggalSK: tanggalSK || '',
+          authorUid: user.uid,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await addDoc(collection(db, 'unit_info'), {
+          unitKerja: selectedUnitForTeams,
+          nomorSK: nomorSK || '',
+          tanggalSK: tanggalSK || '',
+          authorUid: user.uid,
+          updatedAt: serverTimestamp()
+        });
+      }
+      setIsEditingUnitSK(false);
+      toast.success('Informasi SK Unit Kerja berhasil diperbarui');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'unit_info');
+    }
+  };
+
   const handleTakeSKP = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedRecord || !user) return;
@@ -837,7 +1204,11 @@ export default function App() {
   const confirmDelete = async () => {
     if (!deletingInfo) return;
     const { id, type } = deletingInfo;
-    const collectionName = type === 'SKP' ? 'skp_records' : (type === 'PLT' ? 'plt_records' : (type === 'PLH' ? 'plh_records' : 'work_teams'));
+    const collectionName = 
+      type === 'SKP' ? 'skp_records' : 
+      type === 'SKP_MONITORING' ? 'skp_monitoring_records' :
+      type === 'PLT' ? 'plt_records' : 
+      type === 'PLH' ? 'plh_records' : 'work_teams';
     
     try {
       await deleteDoc(doc(db, collectionName, id));
@@ -868,10 +1239,6 @@ export default function App() {
       'Rating Hasil Kerja': record.ratingHasilKerja || '-',
       'Rating Hasil Perilaku': record.ratingHasilPerilaku || '-',
       'Predikat Kinerja': record.predikatKinerja || '-',
-      'Pengambil': record.pengambil || '-',
-      'Unit Kerja Pengambil': record.unitKerjaPengambil || '-',
-      'Tanggal Ambil': record.tanggalAmbil ? format(new Date(record.tanggalAmbil), 'dd MMMM yyyy, HH:mm', { locale: id }) : '-',
-      'Keterangan': record.keterangan || '-',
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -888,6 +1255,464 @@ export default function App() {
 
     XLSX.writeFile(workbook, `Data_SKP_Export_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
     toast.success('Data SKP berhasil diekspor ke Excel');
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
+  };
+
+  const triggerMonitoringFileInput = () => {
+    monitoringFileInputRef.current?.click();
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check file extension
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    if (fileExt !== 'xlsx' && fileExt !== 'xls') {
+      toast.error('Format file harus .xlsx atau .xls');
+      return;
+    }
+
+    setIsImporting(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const dataBuffer = evt.target?.result as ArrayBuffer;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) {
+          toast.error('File Excel kosong');
+          setIsImporting(false);
+          return;
+        }
+
+        let importCount = 0;
+        let skipCount = 0;
+        
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i] as any;
+          
+          try {
+            // Get raw values with multiple possible aliases
+            const rawNama = row['Nama Pegawai'] || row['namaPegawai'] || row['Nama'] || row['nama'] || '';
+            const rawNip = row['NIP'] || row['nip'] || '';
+            const rawJabatan = row['Jabatan'] || row['jabatan'] || '';
+            const rawUnit = row['Unit Kerja'] || row['unitKerja'] || '';
+            const rawTahun = row['Tahun'] || row['tahun'] || row['thn'] || new Date().getFullYear();
+            const rawPeriode = row['Periode'] || row['periode'] || 'Tahunan';
+            const rawJenisDok = row['Jenis Dokumen'] || row['jenisDokumen'] || row['dokumen'] || '';
+            const rawStatus = row['Status'] || row['status'] || 'Sudah Diambil';
+            
+            // Rating attributes
+            const rawRatingHasil = row['Rating Hasil Kerja'] || row['ratingHasilKerja'] || row['Rating Kerja'] || row['hasilKerja'] || null;
+            const rawRatingPerilaku = row['Rating Hasil Perilaku'] || row['ratingHasilPerilaku'] || row['Rating Perilaku'] || row['perilaku'] || null;
+            const rawPredikat = row['Predikat Kinerja'] || row['predikatKinerja'] || row['Predikat'] || row['predikat'] || null;
+
+            // Map fields with type conversion
+            const newRecord = {
+              nip: String(rawNip).trim(),
+              namaPegawai: String(rawNama).trim(),
+              jabatan: String(rawJabatan).trim(),
+              unitKerja: String(rawUnit).trim(),
+              tahun: isNaN(Number(rawTahun)) ? new Date().getFullYear() : Number(rawTahun),
+              periode: (PERIODE_LIST.includes(rawPeriode as SKPPeriode) ? rawPeriode : 'Tahunan') as SKPPeriode,
+              jenisDokumen: Array.isArray(rawJenisDok) 
+                ? rawJenisDok 
+                : String(rawJenisDok).split(/[,,|]/).map(s => s.trim()).filter(Boolean),
+              status: (['Sudah Diambil', 'Belum Diambil'].includes(rawStatus as SKPStatus) ? rawStatus : 'Sudah Diambil') as SKPStatus,
+              ratingHasilKerja: rawRatingHasil ? String(rawRatingHasil).trim() : null,
+              ratingHasilPerilaku: rawRatingPerilaku ? String(rawRatingPerilaku).trim() : null,
+              predikatKinerja: rawPredikat ? String(rawPredikat).trim() : null,
+              authorUid: user.uid,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+
+            // Validation: Minimal requirement is Name
+            if (!newRecord.namaPegawai) {
+              console.warn(`Row ${i + 1} skipped: Nama Pegawai kosong`);
+              skipCount++;
+              continue;
+            }
+
+            await addDoc(collection(db, 'skp_records'), newRecord);
+            importCount++;
+          } catch (rowError) {
+            console.error(`Error processing row ${i + 1}:`, rowError);
+            handleFirestoreError(rowError, OperationType.CREATE, 'skp_records_batch_import');
+          }
+        }
+
+        if (importCount > 0) {
+          toast.success(`${importCount} data SKP berhasil diimpor.${skipCount > 0 ? ` (${skipCount} baris dilewati because data tidak lengkap)` : ''}`);
+        } else {
+          toast.error('Tidak ada data valid yang berhasil diimpor. Pastikan kolom "Nama Pegawai" terisi.');
+        }
+      } catch (error) {
+        console.error('Error importing Excel:', error);
+        toast.error('Gagal mengimpor file Excel. Pastikan file tidak diproteksi dan format kolom mendekati standar export.');
+      } finally {
+        setIsImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+  
+  const triggerPltPlhFileInput = () => {
+    pltPlhFileInputRef.current?.click();
+  };
+  
+  const triggerTeamsFileInput = () => {
+    teamsFileInputRef.current?.click();
+  };
+
+  const handleExportTeams = () => {
+    if (workTeams.length === 0) {
+      toast.error('Tidak ada data tim untuk diekspor');
+      return;
+    }
+
+    const workbook = XLSX.utils.book_new();
+    
+    // Group teams by unitKerja
+    const groupedExportData: Record<string, any[]> = {};
+    
+    workTeams.forEach(team => {
+      const unit = team.unitKerja || 'Lainnya';
+      const unitInfo = unitInfoList.find(u => u.unitKerja === unit);
+
+      const data = {
+        'Nama Tim': team.namaTim,
+        'Unit Kerja': team.unitKerja,
+        'Tahun': team.tahun,
+        'Status Tim': team.status,
+        'Jenis': team.jenis,
+        'Nama Ketua': team.ketua.nama,
+        'Jabatan Ketua': team.ketua.jabatan,
+        'Status Ketua': team.ketua.status,
+        'Nomor SK Unit': unitInfo?.nomorSK || '-',
+        'Tanggal SK Unit': unitInfo?.tanggalSK || '-',
+        'Jumlah Anggota': team.anggota.length,
+        'Daftar Anggota': team.anggota.map(a => `${a.nama} (${a.jabatan})`).join('; '),
+        'Bagian': team.parentId ? (workTeams.find(t => t.id === team.parentId)?.namaTim || '-') : '-'
+      };
+      
+      if (!groupedExportData[unit]) {
+        groupedExportData[unit] = [];
+      }
+      groupedExportData[unit].push(data);
+    });
+
+    // Create a sheet for each Unit Kerja
+    Object.entries(groupedExportData).forEach(([unit, data]) => {
+      // Excel sheet name limits: max 31 chars, no special chars \ / ? * [ ] :
+      const safeUnitName = unit.substring(0, 31).replace(/[\\/?*[\]:]/g, '_') || 'Sheet';
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(workbook, worksheet, safeUnitName);
+    });
+
+    XLSX.writeFile(workbook, `Tim_Kerja_${format(new Date(), 'yyyyMMdd')}.xlsx`);
+  };
+
+  const handleImportTeamsExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    if (fileExt !== 'xlsx' && fileExt !== 'xls') {
+      toast.error('Format file harus .xlsx atau .xls');
+      return;
+    }
+
+    setIsImportingTeams(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const dataBuffer = evt.target?.result as ArrayBuffer;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) {
+          toast.error('File Excel kosong');
+          setIsImportingTeams(false);
+          return;
+        }
+
+        let importCount = 0;
+        let skipCount = 0;
+        
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i] as any;
+          
+          try {
+            const namaTim = row['Nama Tim'] || row['namaTim'] || '';
+            const unitKerja = row['Unit Kerja'] || row['unitKerja'] || '';
+            const namaKetua = row['Nama Ketua'] || row['namaKetua'] || '';
+            const jabatanKetua = row['Jabatan Ketua'] || row['jabatanKetua'] || '';
+            const statusKetua = row['Status Ketua'] || row['statusKetua'] || 'PNS';
+            const tahun = row['Tahun'] || row['tahun'] || new Date().getFullYear();
+            const jenis = row['Jenis'] || row['jenis'] || 'Tim Kerja';
+            const statusTeam = row['Status Tim'] || row['statusTim'] || 'Aktif';
+
+            if (!namaTim || !unitKerja || !namaKetua || !jabatanKetua) {
+              skipCount++;
+              continue;
+            }
+
+            const newTeam = {
+              namaTim: String(namaTim).trim(),
+              unitKerja: String(unitKerja).trim(),
+              tahun: isNaN(Number(tahun)) ? new Date().getFullYear() : Number(tahun),
+              status: (statusTeam === 'Aktif' || statusTeam === 'Non-Aktif' ? statusTeam : 'Aktif') as 'Aktif' | 'Non-Aktif',
+              jenis: (jenis === 'Tim Kerja' || jenis === 'Bagian' ? jenis : 'Tim Kerja') as 'Tim Kerja' | 'Bagian',
+              ketua: {
+                nama: String(namaKetua).trim(),
+                jabatan: String(jabatanKetua).trim(),
+                status: String(statusKetua).trim()
+              },
+              anggota: [],
+              authorUid: user!.uid,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+
+            await addDoc(collection(db, 'work_teams'), newTeam);
+            importCount++;
+          } catch (err) {
+            console.error('Error importing team row:', err);
+            skipCount++;
+          }
+        }
+
+        toast.success(`Berhasil mengimpor ${importCount} tim kerja. Skip: ${skipCount}`);
+      } catch (error) {
+        console.error('Import error:', error);
+        toast.error('Gagal membaca file Excel');
+      } finally {
+        setIsImportingTeams(false);
+        if (teamsFileInputRef.current) teamsFileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleImportMonitoringExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    if (fileExt !== 'xlsx' && fileExt !== 'xls') {
+      toast.error('Format file harus .xlsx atau .xls');
+      return;
+    }
+
+    setIsImportingMonitoring(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const dataBuffer = evt.target?.result as ArrayBuffer;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) {
+          toast.error('File Excel kosong');
+          setIsImportingMonitoring(false);
+          return;
+        }
+
+        let importCount = 0;
+        let skipCount = 0;
+        
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i] as any;
+          
+          try {
+            const rawNama = row['Nama Pegawai'] || row['namaPegawai'] || row['Nama'] || row['nama'] || '';
+            const rawNip = row['NIP'] || row['nip'] || '';
+            const rawJabatan = row['Jabatan'] || row['jabatan'] || '';
+            const rawUnit = row['Unit Kerja'] || row['unitKerja'] || '';
+            const rawTahun = row['Tahun'] || row['tahun'] || new Date().getFullYear();
+            const rawPeriode = row['Periode'] || row['periode'] || 'Tahunan';
+            const rawRatingHasil = row['Rating Hasil Kerja'] || row['ratingHasilKerja'] || null;
+            const rawRatingPerilaku = row['Rating Hasil Perilaku'] || row['ratingHasilPerilaku'] || null;
+            const rawPredikat = row['Predikat Kinerja'] || row['predikatKinerja'] || null;
+
+            const newRecord = {
+              nip: String(rawNip).trim(),
+              namaPegawai: String(rawNama).trim(),
+              jabatan: String(rawJabatan).trim(),
+              unitKerja: String(rawUnit).trim(),
+              tahun: isNaN(Number(rawTahun)) ? new Date().getFullYear() : Number(rawTahun),
+              periode: (PERIODE_LIST.includes(rawPeriode as SKPPeriode) ? rawPeriode : 'Tahunan') as SKPPeriode,
+              ratingHasilKerja: rawRatingHasil ? String(rawRatingHasil).trim() : null,
+              ratingHasilPerilaku: rawRatingPerilaku ? String(rawRatingPerilaku).trim() : null,
+              predikatKinerja: rawPredikat ? String(rawPredikat).trim() : null,
+              authorUid: user.uid,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+
+            if (!newRecord.namaPegawai) {
+              skipCount++;
+              continue;
+            }
+
+            await addDoc(collection(db, 'skp_monitoring_records'), newRecord);
+            importCount++;
+          } catch (err) {
+            console.error('Error importing row:', err);
+            skipCount++;
+          }
+        }
+
+        toast.success(`Berhasil mengimpor ${importCount} data monitoring. Skip: ${skipCount}`);
+      } catch (error) {
+        console.error('Import error:', error);
+        toast.error('Gagal membaca file Excel');
+      } finally {
+        setIsImportingMonitoring(false);
+        if (monitoringFileInputRef.current) monitoringFileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleImportPltPlhExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!user) {
+      toast.error('Silakan login terlebih dahulu');
+      return;
+    }
+
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    if (fileExt !== 'xlsx' && fileExt !== 'xls') {
+      toast.error('Format file harus .xlsx atau .xls');
+      return;
+    }
+
+    setIsImportingPltPlh(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const dataBuffer = evt.target?.result as ArrayBuffer;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) {
+          toast.error('File Excel kosong');
+          setIsImportingPltPlh(false);
+          return;
+        }
+
+        let pltCount = 0;
+        let plhCount = 0;
+        let skipCount = 0;
+        
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i] as any;
+          
+          try {
+            const rawNama = row['Nama Pegawai'] || row['namaPegawai'] || row['Nama'] || '';
+            const rawNip = row['NIP'] || row['nip'] || '';
+            const rawTipe = String(row['Tipe'] || row['tipe'] || row['Jenis'] || '').toUpperCase();
+            const isPLT = rawTipe.includes('PLT');
+            const isPLH = rawTipe.includes('PLH');
+
+            if (!isPLT && !isPLH) {
+              console.warn(`Row ${i + 1} skipped: Tipe tidak jelas (PLT/PLH)`);
+              skipCount++;
+              continue;
+            }
+
+            const rawJabatanAsli = row['Jabatan Asli'] || row['jabatanAsli'] || '';
+            const rawJabatanTugas = row['Jabatan Tugas'] || row['jabatanTugas'] || row['Jabatan PLT'] || row['Jabatan PLH'] || '';
+            const rawUnitAsli = row['Unit Kerja Asli'] || row['unitKerja'] || '';
+            const rawUnitTugas = row['Unit Kerja Tugas'] || row['unitKerjaTugas'] || '';
+            const rawNoSk = row['No SK'] || row['noSk'] || '';
+            const rawTglMulai = row['Tanggal Mulai'] || row['tglMulai'] || '';
+            const rawTglSelesai = row['Tanggal Selesai'] || row['tglSelesai'] || '';
+            const rawStatus = row['Status'] || row['status'] || 'Aktif';
+
+            if (!rawNama) {
+              skipCount++;
+              continue;
+            }
+
+            if (isPLT) {
+              const newPlt = {
+                nip: String(rawNip).trim(),
+                namaPegawai: String(rawNama).trim(),
+                jabatanAsli: String(rawJabatanAsli).trim(),
+                jabatanPlt: String(rawJabatanTugas).trim(),
+                unitKerja: String(rawUnitAsli).trim(),
+                unitKerjaTugas: String(rawUnitTugas).trim(),
+                noSk: String(rawNoSk).trim(),
+                tglMulai: String(rawTglMulai).trim(),
+                tglSelesai: String(rawTglSelesai).trim(),
+                status: (rawStatus === 'Selesai' ? 'Selesai' : 'Aktif') as PLTStatus,
+                authorUid: user.uid,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              };
+              await addDoc(collection(db, 'plt_records'), newPlt);
+              pltCount++;
+            } else {
+              const newPlh = {
+                nip: String(rawNip).trim(),
+                namaPegawai: String(rawNama).trim(),
+                jabatanAsli: String(rawJabatanAsli).trim(),
+                jabatanPlh: String(rawJabatanTugas).trim(),
+                unitKerja: String(rawUnitAsli).trim(),
+                unitKerjaTugas: String(rawUnitTugas).trim(),
+                noSk: String(rawNoSk).trim(),
+                tglMulai: String(rawTglMulai).trim(),
+                tglSelesai: String(rawTglSelesai).trim(),
+                status: (rawStatus === 'Selesai' ? 'Selesai' : 'Aktif') as PLTStatus,
+                authorUid: user.uid,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              };
+              await addDoc(collection(db, 'plh_records'), newPlh);
+              plhCount++;
+            }
+          } catch (rowError) {
+            console.error(`Error processing row ${i + 1}:`, rowError);
+          }
+        }
+
+        toast.success(`Berhasil mengimpor ${pltCount} PLT dan ${plhCount} PLH.${skipCount > 0 ? ` (${skipCount} baris dilewati)` : ''}`);
+      } catch (error) {
+        console.error('Error importing Excel:', error);
+        toast.error('Gagal mengimpor file Excel PLT/PLH.');
+      } finally {
+        setIsImportingPltPlh(false);
+        if (pltPlhFileInputRef.current) pltPlhFileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
   };
 
   const handleExportPltPlh = () => {
@@ -953,7 +1778,7 @@ export default function App() {
   };
 
   const renderTeamCard = (team: WorkTeam, isSubTeam = false) => (
-    <Card key={team.id} className={`overflow-hidden border-none shadow-sm hover:shadow-md transition-all group ${isSubTeam ? 'border-l-4 border-l-primary/20 bg-primary/5' : ''}`}>
+    <Card key={team.id} className="overflow-hidden border-none shadow-sm hover:shadow-md transition-all group cursor-pointer" onClick={() => setSelectedTeamIdForDetails(team.id)}>
       <CardHeader className={`${isSubTeam ? 'bg-primary/10' : 'bg-primary/5'} pb-4`}>
         <div className="flex justify-between items-start">
           <div className="space-y-1">
@@ -971,117 +1796,20 @@ export default function App() {
               Tahun {team.tahun}
             </CardDescription>
           </div>
-          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-7 w-7 text-muted-foreground hover:text-primary"
-              onClick={() => {
-                setEditingTeam(team);
-                setJenisEditTeam(team.jenis || 'Tim Kerja');
-                setIsEditTeamDialogOpen(true);
-              }}
-            >
-              <UserCog className="h-3.5 w-3.5" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-7 w-7 text-muted-foreground hover:text-destructive"
-              onClick={() => {
-                setDeletingInfo({ id: team.id, type: 'TIM' });
-                setIsDeleteConfirmOpen(true);
-              }}
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
+          <div className="h-8 w-8 rounded-full flex items-center justify-center text-primary/20 group-hover:bg-primary group-hover:text-white transition-all">
+            <ArrowRight className="h-4 w-4" />
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pt-4 space-y-4">
-        {/* Ketua Section */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-            <UserCheck className="h-3 w-3" />
-            {team.jenis === 'Bagian' ? 'Kepala Bagian' : 'Ketua Tim'}
+      <CardContent className="pt-4">
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground font-bold uppercase tracking-widest">
+          <div className="flex items-center gap-1.5 font-black text-[#1A4A9A] line-clamp-1">
+            <UserCheck className="h-3 w-3 shrink-0" />
+            <span className="truncate">{team.ketua.nama}</span>
           </div>
-          <div className="flex flex-col bg-muted/30 p-2 rounded-lg border border-muted-foreground/5">
-            <div className="flex justify-between items-start">
-              <span className="text-sm font-bold">{team.ketua.nama}</span>
-              <Badge variant="secondary" className="text-[8px] h-3.5 px-1 py-0 bg-primary/10 text-primary border-none">
-                {team.ketua.status}
-              </Badge>
-            </div>
-            <span className="text-[10px] text-muted-foreground font-medium italic">{team.ketua.jabatan}</span>
-          </div>
-        </div>
-
-        {/* Anggota Section */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-              <Users className="h-3 w-3" />
-              Anggota ({team.anggota.length})
-            </div>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10"
-              onClick={() => {
-                setSelectedTeamForMember(team.id);
-                setIsAddMemberDialogOpen(true);
-              }}
-            >
-              <Plus className="h-3 w-3 mr-1" />
-              Tambah
-            </Button>
-          </div>
-          
-          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1 custom-scrollbar">
-            {team.anggota.length > 0 ? (
-              team.anggota.map((member) => (
-                <div key={member.nama} className="flex items-center justify-between group/member bg-white p-2 rounded-md border border-muted shadow-sm hover:border-primary/20 transition-colors">
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-bold truncate">{member.nama}</span>
-                    <span className="text-[10px] text-muted-foreground font-medium italic leading-tight">{member.jabatan}</span>
-                    <div className="mt-1">
-                      <Badge variant="outline" className="text-[8px] h-3.5 px-1 py-0 border-muted-foreground/20 text-muted-foreground">
-                        {member.status}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover/member:opacity-100 transition-opacity">
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-6 w-6 text-muted-foreground hover:text-primary"
-                      onClick={() => {
-                        setEditingMemberInfo({ 
-                          teamId: team.id, 
-                          member: member, 
-                          index: team.anggota.indexOf(member) 
-                        });
-                        setIsEditMemberDialogOpen(true);
-                      }}
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleRemoveMember(team.id, member.nama)}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-4 border border-dashed rounded-lg">
-                <p className="text-[10px] text-muted-foreground italic">Belum ada anggota</p>
-              </div>
-            )}
+          <div className="flex items-center gap-1.5">
+            <Users className="h-3 w-3" />
+            {team.anggota.length} Anggota
           </div>
         </div>
       </CardContent>
@@ -1109,6 +1837,17 @@ export default function App() {
 
           <nav className="flex flex-col gap-2">
             <Button 
+              variant={activeTab === 'struktur-organisasi' ? 'default' : 'ghost'} 
+              className={cn(
+                "justify-start gap-3 h-10 px-4 transition-all", 
+                activeTab === 'struktur-organisasi' ? "shadow-sm" : "text-muted-foreground"
+              )}
+              onClick={() => setActiveTab('struktur-organisasi')}
+            >
+              <Network className="h-4 w-4" />
+              Struktur Organisasi
+            </Button>
+            <Button 
               variant={activeTab === 'tim-kerja' ? 'default' : 'ghost'} 
               className={cn(
                 "justify-start gap-3 h-10 px-4 transition-all", 
@@ -1126,6 +1865,20 @@ export default function App() {
                 activeTab === 'skp' ? "shadow-sm" : "text-muted-foreground"
               )}
               onClick={() => setActiveTab('skp')}
+            >
+              <FileCheck className="h-4 w-4" />
+              Berkas SKP Pegawai
+            </Button>
+            <Button 
+              variant={activeTab === 'skp-monitoring' ? 'default' : 'ghost'} 
+              className={cn(
+                "justify-start gap-3 h-10 px-4 transition-all", 
+                activeTab === 'skp-monitoring' ? "shadow-sm" : "text-muted-foreground"
+              )}
+              onClick={() => {
+                setActiveTab('skp-monitoring');
+                setMonitoringSelectedEmployee(null);
+              }}
             >
               <FileText className="h-4 w-4" />
               SKP Pegawai
@@ -1196,13 +1949,49 @@ export default function App() {
 
             <div className="hidden md:block">
               <h2 className="text-sm font-semibold text-muted-foreground">
-                {activeTab === 'tim-kerja' ? 'Monitoring Tim Kerja' : activeTab === 'skp' ? 'Monitoring SKP Pegawai' : activeTab === 'plt-plh' ? 'Monitoring PLT & PLH' : 'Arsip Dokumen'}
+                {activeTab === 'struktur-organisasi' ? 'Struktur Organisasi' : activeTab === 'tim-kerja' ? 'Monitoring Tim Kerja' : activeTab === 'skp' ? 'Monitoring Berkas SKP Pegawai' : activeTab === 'skp-monitoring' ? 'Monitoring SKP Pegawai (Rating)' : activeTab === 'plt-plh' ? 'Monitoring PLT & PLH' : 'Arsip Dokumen'}
               </h2>
             </div>
 
             <div className="flex items-center gap-3">
               {user && activeTab === 'tim-kerja' && (
-                <Dialog open={isAddTeamDialogOpen} onOpenChange={(open) => {
+                <>
+                  <input
+                    type="file"
+                    ref={teamsFileInputRef}
+                    onChange={handleImportTeamsExcel}
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="hidden sm:flex gap-2 h-9"
+                    onClick={triggerTeamsFileInput}
+                    disabled={isImportingTeams}
+                  >
+                    {isImportingTeams ? (
+                      <span className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        Importing...
+                      </span>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4" />
+                        Import Excel
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="hidden sm:flex gap-2 h-9"
+                    onClick={handleExportTeams}
+                  >
+                    <Download className="h-4 w-4" />
+                    Export Excel
+                  </Button>
+                  <Dialog open={isAddTeamDialogOpen} onOpenChange={(open) => {
                   setIsAddTeamDialogOpen(open);
                   if (!open) {
                     setPendingSubTeams([]);
@@ -1262,7 +2051,7 @@ export default function App() {
                         </div>
                         <div className="grid gap-2">
                           <Label htmlFor="unitKerja">Unit Kerja</Label>
-                          <Select name="unitKerja" required>
+                          <Select name="unitKerja" defaultValue={selectedUnitForTeams || undefined} required>
                             <SelectTrigger>
                               <SelectValue placeholder="Pilih Unit Kerja" />
                             </SelectTrigger>
@@ -1462,10 +2251,37 @@ export default function App() {
                     </form>
                   </DialogContent>
                 </Dialog>
+              </>
               )}
 
               {user && activeTab === 'skp' && (
                 <>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleImportExcel}
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="hidden sm:flex gap-2 h-9"
+                    onClick={triggerFileInput}
+                    disabled={isImporting}
+                  >
+                    {isImporting ? (
+                      <span className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        Importing...
+                      </span>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4" />
+                        Import Excel
+                      </>
+                    )}
+                  </Button>
                   <Button 
                     variant="outline" 
                     size="sm" 
@@ -1483,15 +2299,15 @@ export default function App() {
                       render={<Button size="sm" className="gap-2 h-9 shadow-sm" />}
                     >
                       <Plus className="h-4 w-4" />
-                      Tambah Data
+                      Tambah Data Berkas
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                       {isAddDialogOpen && (
                         <form onSubmit={handleAddRecord}>
                           <DialogHeader>
-                            <DialogTitle>Tambah Data SKP Baru</DialogTitle>
+                            <DialogTitle>Tambah Berkas SKP Baru</DialogTitle>
                             <DialogDescription>
-                              Masukkan informasi pegawai untuk monitoring SKP.
+                              Masukkan informasi pegawai untuk monitoring berkas SKP.
                             </DialogDescription>
                           </DialogHeader>
                           <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
@@ -1562,49 +2378,6 @@ export default function App() {
                                 ))}
                               </div>
                             </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div className="grid gap-2">
-                                <Label htmlFor="ratingHasilKerja">Rating Hasil Kerja</Label>
-                                <Select name="ratingHasilKerja">
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Pilih Rating" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {RATING_HASIL_KERJA_LIST.map(rating => (
-                                      <SelectItem key={rating} value={rating}>{rating}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="grid gap-2">
-                                <Label htmlFor="ratingHasilPerilaku">Rating Hasil Perilaku</Label>
-                                <Select name="ratingHasilPerilaku">
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Pilih Rating" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {RATING_PERILAKU_LIST.map(rating => (
-                                      <SelectItem key={rating} value={rating}>{rating}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-
-                            <div className="grid gap-2">
-                              <Label htmlFor="predikatKinerja">Predikat Kinerja</Label>
-                              <Select name="predikatKinerja">
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Pilih Predikat" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {PREDIKAT_KINERJA_LIST.map(predikat => (
-                                    <SelectItem key={predikat} value={predikat}>{predikat}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
                           </div>
                           <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
                             <DialogClose 
@@ -1612,18 +2385,331 @@ export default function App() {
                               render={<Button type="button" variant="outline">Batal</Button>} 
                             />
                             <Button type="submit" className="bg-primary hover:bg-primary/90">
-                              Simpan Data SKP
+                              Simpan Berkas
                             </Button>
                           </DialogFooter>
                       </form>
                     )}
-                  </DialogContent>
-                </Dialog>
-              </>
-            )}
+                    </DialogContent>
+                  </Dialog>
+                </>
+              )}
+
+              {user && activeTab === 'skp-monitoring' && (
+                <>
+                  <input
+                    type="file"
+                    ref={monitoringFileInputRef}
+                    onChange={handleImportMonitoringExcel}
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="hidden sm:flex gap-2 h-9"
+                    onClick={triggerMonitoringFileInput}
+                    disabled={isImportingMonitoring}
+                  >
+                    {isImportingMonitoring ? (
+                      <span className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        Importing...
+                      </span>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4" />
+                        Import Excel
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="hidden sm:flex gap-2 h-9"
+                    onClick={() => {
+                      if (monitoringRecords.length === 0) {
+                        toast.error('Tidak ada data untuk diekspor');
+                        return;
+                      }
+                      const exportData = monitoringRecords.map(r => ({
+                        'NIP': r.nip,
+                        'Nama Pegawai': r.namaPegawai,
+                        'Jabatan': r.jabatan,
+                        'Unit Kerja': r.unitKerja,
+                        'Tahun': r.tahun,
+                        'Periode': r.periode,
+                        'Rating Hasil Kerja': r.ratingHasilKerja || '-',
+                        'Rating Hasil Perilaku': r.ratingHasilPerilaku || '-',
+                        'Predikat Kinerja': r.predikatKinerja || '-',
+                      }));
+                      const worksheet = XLSX.utils.json_to_sheet(exportData);
+                      const workbook = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(workbook, worksheet, 'Data Monitoring SKP');
+                      XLSX.writeFile(workbook, `Monitoring_SKP_${format(new Date(), 'yyyyMMdd')}.xlsx`);
+                    }}
+                  >
+                    <Download className="h-4 w-4" />
+                    Export Monitoring
+                  </Button>
+                  <Dialog open={isAddMonitoringDialogOpen} onOpenChange={setIsAddMonitoringDialogOpen}>
+                    <DialogTrigger 
+                      nativeButton={true}
+                      render={<Button size="sm" className="gap-2 h-9 shadow-sm" />}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Tambah Nilai SKP
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+                      <form onSubmit={handleAddMonitoringRecord}>
+                        <DialogHeader>
+                          <DialogTitle>Tambah Nilai SKP Baru</DialogTitle>
+                          <DialogDescription>
+                            Masukkan penilaian rating dan predikat kinerja pegawai.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label htmlFor="namaPegawai">Nama Lengkap</Label>
+                                <Input id="namaPegawai" name="namaPegawai" placeholder="Contoh: Ahmad Subarjo" required />
+                              </div>
+                              <div className="grid gap-2">
+                                <Label htmlFor="nip">NIP</Label>
+                                <Input id="nip" name="nip" placeholder="18 digit NIP" required />
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label htmlFor="jabatan">Jabatan</Label>
+                                <Input id="jabatan" name="jabatan" placeholder="Contoh: Analis Kepegawaian" required />
+                              </div>
+                              <div className="grid gap-2">
+                                <Label htmlFor="unitKerja">Unit Kerja</Label>
+                                <Select name="unitKerja" required>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Unit Kerja" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {UNIT_KERJA_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label htmlFor="tahun">Tahun</Label>
+                                <Input name="tahun" type="number" defaultValue={new Date().getFullYear()} required />
+                              </div>
+                              <div className="grid gap-2">
+                                <Label htmlFor="periode">Periode</Label>
+                                <Select name="periode" defaultValue="Tahunan" required>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Periode" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PERIODE_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label>Rating Hasil Kerja</Label>
+                                <Select name="ratingHasilKerja">
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Rating" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {RATING_HASIL_KERJA_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="grid gap-2">
+                                <Label>Rating Perilaku</Label>
+                                <Select name="ratingHasilPerilaku">
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Rating" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {RATING_PERILAKU_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="grid gap-2">
+                              <Label>Predikat Kinerja</Label>
+                              <Select name="predikatKinerja">
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Pilih Predikat" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PREDIKAT_KINERJA_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                        </div>
+                        <DialogFooter className="sticky bottom-0 bg-background pt-2 border-t mt-2">
+                          <DialogClose nativeButton={true} render={<Button type="button" variant="outline">Batal</Button>} />
+                          <Button type="submit">Simpan Nilai</Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Dialog open={isEditMonitoringDialogOpen} onOpenChange={setIsEditMonitoringDialogOpen}>
+                    <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+                      {editingMonitoringRecord && (
+                        <form onSubmit={handleUpdateMonitoringRecord}>
+                          <DialogHeader>
+                            <DialogTitle>Edit Nilai SKP</DialogTitle>
+                            <DialogDescription>
+                              Perbarui penilaian rating dan predikat kinerja pegawai.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="grid gap-2">
+                                  <Label htmlFor="editMonitoringNamaPegawai">Nama Lengkap</Label>
+                                  <Input 
+                                    id="editMonitoringNamaPegawai" 
+                                    name="namaPegawai" 
+                                    defaultValue={editingMonitoringRecord.namaPegawai} 
+                                    required 
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="editMonitoringNip">NIP</Label>
+                                  <Input 
+                                    id="editMonitoringNip" 
+                                    name="nip" 
+                                    defaultValue={editingMonitoringRecord.nip} 
+                                    required 
+                                  />
+                                </div>
+                              </div>
+                              
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="grid gap-2">
+                                  <Label htmlFor="editMonitoringJabatan">Jabatan</Label>
+                                  <Input 
+                                    id="editMonitoringJabatan" 
+                                    name="jabatan" 
+                                    defaultValue={editingMonitoringRecord.jabatan} 
+                                    required 
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="editMonitoringUnitKerja">Unit Kerja</Label>
+                                  <Select name="unitKerja" defaultValue={editingMonitoringRecord.unitKerja}>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Pilih Unit Kerja" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {UNIT_KERJA_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="grid gap-2">
+                                  <Label htmlFor="editMonitoringTahun">Tahun</Label>
+                                  <Input name="tahun" type="number" defaultValue={editingMonitoringRecord.tahun} required />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="editMonitoringPeriode">Periode</Label>
+                                  <Select name="periode" defaultValue={editingMonitoringRecord.periode}>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Pilih Periode" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {PERIODE_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="grid gap-2">
+                                  <Label>Rating Hasil Kerja</Label>
+                                  <Select name="ratingHasilKerja" defaultValue={editingMonitoringRecord.ratingHasilKerja}>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Pilih Rating" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {RATING_HASIL_KERJA_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label>Rating Perilaku</Label>
+                                  <Select name="ratingHasilPerilaku" defaultValue={editingMonitoringRecord.ratingHasilPerilaku}>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Pilih Rating" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {RATING_PERILAKU_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+
+                              <div className="grid gap-2">
+                                <Label>Predikat Kinerja</Label>
+                                <Select name="predikatKinerja" defaultValue={editingMonitoringRecord.predikatKinerja}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Predikat" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PREDIKAT_KINERJA_LIST.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                          </div>
+                          <DialogFooter className="sticky bottom-0 bg-background pt-2 border-t mt-2">
+                            <DialogClose nativeButton={true} render={<Button type="button" variant="outline">Batal</Button>} />
+                            <Button type="submit">Update Nilai</Button>
+                          </DialogFooter>
+                        </form>
+                      )}
+                    </DialogContent>
+                  </Dialog>
+                </>
+              )}
 
               {user && activeTab === 'plt-plh' && (
                 <>
+                  <input
+                    type="file"
+                    ref={pltPlhFileInputRef}
+                    onChange={handleImportPltPlhExcel}
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="hidden sm:flex gap-2 h-9"
+                    onClick={triggerPltPlhFileInput}
+                    disabled={isImportingPltPlh}
+                  >
+                    {isImportingPltPlh ? (
+                      <span className="flex items-center gap-2">
+                        <span className="h-3 w-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        Importing...
+                      </span>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4" />
+                        Import Excel
+                      </>
+                    )}
+                  </Button>
                   <Button 
                     variant="outline" 
                     size="sm" 
@@ -1920,770 +3006,1457 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8">
-        {activeTab === 'tim-kerja' ? (
-          <div className="space-y-6">
-            {Object.keys(groupedTeams).length > 0 ? (
-              (Object.entries(groupedTeams) as [string, { topLevel: WorkTeam[], subTeams: Record<string, WorkTeam[]> }][]).map(([unitKerja, data]) => (
-                <div key={unitKerja} className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-5 w-5 text-primary" />
-                    <h3 className="text-lg font-bold text-[#1A4A9A]">{unitKerja}</h3>
-                    <Badge variant="outline" className="ml-2 bg-primary/5 text-primary border-primary/20">
-                      {data.topLevel.length + Object.values(data.subTeams).flat().length} Tim
-                    </Badge>
-                  </div>
-                  
-                  <div className="space-y-6">
-                    {data.topLevel.map((team) => (
-                      <div key={team.id} className="space-y-4">
-                        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                          {renderTeamCard(team)}
+        {activeTab === 'struktur-organisasi' ? (
+          <div className="space-y-8">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white/80 backdrop-blur-md p-8 rounded-3xl shadow-sm border border-primary/10"
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+                <div>
+                  <h2 className="text-3xl font-black text-[#1A4A9A] tracking-tight">Struktur Organisasi</h2>
+                  <p className="text-muted-foreground font-medium mt-1 uppercase tracking-widest text-[10px]">Hierarki Struktural Formal Satuan Kerja</p>
+                </div>
+                <Button 
+                  onClick={() => {
+                    setParentOrgNodeId(null);
+                    setIsAddOrgNodeDialogOpen(true);
+                  }}
+                  className="rounded-xl font-bold gap-2 text-xs"
+                >
+                  <Plus className="h-4 w-4" /> TAMBAH JABATAN PUNCAK
+                </Button>
+              </div>
+
+              <div className="overflow-x-auto pb-12 custom-scrollbar">
+                <div className="min-w-[1000px] flex flex-col items-center">
+                  {orgNodes.filter(n => !n.parentId).length === 0 ? (
+                    <div className="text-center py-20 bg-muted/30 rounded-3xl border-2 border-dashed border-muted w-full max-w-lg">
+                      <Network className="h-12 w-12 text-muted-foreground/20 mx-auto mb-4" />
+                      <h3 className="text-lg font-bold text-muted-foreground">Belum Ada Struktur</h3>
+                      <p className="text-sm text-muted-foreground/60 mt-1">Silakan tambahkan jabatan struktural pertama.</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-12">
+                      {orgNodes.filter(n => !n.parentId).map(rootNode => (
+                        <div key={rootNode.id} className="flex flex-col items-center w-full">
+                          <OrgNodeCard 
+                            node={rootNode} 
+                            allNodes={orgNodes} 
+                            onAddSub={(id) => {
+                              setParentOrgNodeId(id);
+                              setIsAddOrgNodeDialogOpen(true);
+                            }}
+                            onEdit={(node) => {
+                              setEditingOrgNode(node);
+                              setIsEditOrgNodeDialogOpen(true);
+                            }}
+                            onDelete={handleDeleteOrgNode}
+                          />
                         </div>
-                        {data.subTeams[team.id] && data.subTeams[team.id].length > 0 && (
-                          <div className="ml-8 pl-4 border-l-2 border-primary/10 space-y-4">
-                            <div className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest">
-                              <ArrowRight className="h-3 w-3" />
-                              Tim Kerja di bawah {team.namaTim}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        ) : activeTab === 'tim-kerja' ? (
+          <div className="space-y-6">
+            {!selectedUnitForTeams ? (
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {UNIT_KERJA_LIST.map((unit, index) => {
+                  const unitData = groupedTeams[unit];
+                  const teamCount = unitData ? (unitData.topLevel.length + Object.values(unitData.subTeams).flat().length) : 0;
+                  
+                  return (
+                    <motion.div
+                      key={unit}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      whileHover={{ y: -8, scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setSelectedUnitForTeams(unit)}
+                      className="cursor-pointer"
+                    >
+                      <Card className="h-full border-none shadow-sm hover:shadow-xl transition-all duration-300 group overflow-hidden bg-white/50 backdrop-blur-sm ring-1 ring-black/5 hover:ring-primary/20">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/20 via-primary to-primary/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <CardHeader className="pt-6 pb-2 px-6">
+                          <div className="flex items-center justify-between">
+                            <div className="h-12 w-12 rounded-2xl bg-primary/5 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all duration-300 shadow-inner">
+                              <Building2 className="h-6 w-6" />
                             </div>
-                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                              {data.subTeams[team.id].map(subTeam => renderTeamCard(subTeam, true))}
+                            <div className="text-right">
+                              <div className="text-2xl font-black text-primary/10 group-hover:text-primary/20 transition-colors leading-none">
+                                {String(index + 1).padStart(2, '0')}
+                              </div>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed shadow-sm">
-                <div className="h-16 w-16 rounded-full bg-primary/5 flex items-center justify-center mb-4">
-                  <Users className="h-8 w-8 text-primary/40" />
-                </div>
-                <h3 className="text-lg font-bold text-muted-foreground">Belum Ada Tim Kerja</h3>
-                <p className="text-sm text-muted-foreground/60 max-w-xs text-center mt-1">
-                  Mulai dengan menambahkan tim kerja baru untuk memantau penugasan di setiap unit kerja.
-                </p>
-                <Button 
-                  variant="outline" 
-                  className="mt-6 gap-2"
-                  onClick={() => setIsAddTeamDialogOpen(true)}
+                        </CardHeader>
+                        <CardContent className="pt-4 pb-8 px-6 flex flex-col justify-between min-h-[160px]">
+                          <div>
+                            <h3 className="font-extrabold text-lg text-[#1A4A9A] line-clamp-3 leading-tight group-hover:text-primary transition-colors tracking-tight">
+                              {unit}
+                            </h3>
+                            <div className="mt-4 flex items-center gap-2">
+                              <Badge variant="secondary" className="bg-primary/10 text-primary border-none font-bold px-2 py-0.5 rounded-md text-[10px]">
+                                {teamCount} TIM KERJA
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="mt-8 flex items-center text-[10px] font-black uppercase tracking-widest text-primary/40 group-hover:text-primary transition-colors">
+                            Buka Dashboard Unit
+                            <ArrowRight className="ml-2 h-3.5 w-3.5 group-hover:translate-x-1 transition-transform" />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            ) : !selectedTeamIdForDetails ? (
+              <div className="space-y-8">
+                <motion.div 
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-primary/10"
                 >
-                  <Plus className="h-4 w-4" />
-                  Tambah Tim Pertama
-                </Button>
+                  <div className="flex items-center gap-4">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => {
+                        setSelectedUnitForTeams(null);
+                        setSearchQuery('');
+                      }}
+                      className="rounded-xl h-12 w-12 p-0 border-primary/10 hover:bg-primary hover:text-white transition-all hover:scale-105 active:scale-95"
+                    >
+                      <ArrowLeft className="h-5 w-5" />
+                    </Button>
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="h-5 w-5 rounded bg-primary/10 flex items-center justify-center">
+                          <Building2 className="h-3 w-3 text-primary" />
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-primary/60">Unit Kerja</span>
+                      </div>
+                      <h3 className="text-xl font-black text-[#1A4A9A] tracking-tight">{selectedUnitForTeams}</h3>
+                      
+                      {(() => {
+                        const unitInfo = unitInfoList.find(u => u.unitKerja === selectedUnitForTeams);
+                        if (!unitInfo && !isEditingUnitSK) {
+                          return (
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => setIsEditingUnitSK(true)}
+                              className="h-6 text-[9px] font-black text-primary/60 hover:text-primary uppercase tracking-widest p-0 mt-1"
+                            >
+                              + TAMBAH INFO SK UNIT
+                            </Button>
+                          );
+                        }
+                        
+                        if (unitInfo && !isEditingUnitSK) {
+                          return (
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
+                              {unitInfo.nomorSK && (
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <FileText className="h-3 w-3 text-primary/40 shrink-0" />
+                                  <span className="text-[10px] font-bold text-primary/80 truncate">SK: {unitInfo.nomorSK}</span>
+                                </div>
+                              )}
+                              {unitInfo.tanggalSK && (
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <Calendar className="h-3 w-3 text-primary/40 shrink-0" />
+                                  <span className="text-[10px] font-bold text-primary/80">
+                                    {format(new Date(unitInfo.tanggalSK), 'dd MMMM yyyy', { locale: id })}
+                                  </span>
+                                </div>
+                              )}
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => setIsEditingUnitSK(true)}
+                                className="h-5 w-5 p-0 text-primary/40 hover:text-primary"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-1 max-w-md mx-auto lg:mx-0 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Cari tim, bagian, atau nama pegawai..."
+                      className="pl-10 h-11 bg-white/50 border-primary/10 focus:border-primary/30 rounded-xl"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="flex items-center gap-3 justify-between sm:justify-end">
+                    <Button 
+                      size="sm" 
+                      className="gap-2 h-11 px-6 rounded-xl font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                      onClick={() => {
+                        setJenisAddTeam('Tim Kerja');
+                        setIsAddTeamDialogOpen(true);
+                      }}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Tambah Tim Baru
+                    </Button>
+                  </div>
+                </motion.div>
+
+                {groupedTeams[selectedUnitForTeams] ? (() => {
+                  const unitData = groupedTeams[selectedUnitForTeams];
+                  const q = searchQuery.toLowerCase();
+                  
+                  const filteredTopLevel = unitData.topLevel.filter(team => {
+                    const matchName = team.namaTim.toLowerCase().includes(q);
+                    const matchKetua = team.ketua.nama.toLowerCase().includes(q);
+                    const matchAnggota = team.anggota.some(a => a.nama.toLowerCase().includes(q));
+                    
+                    // Also check sub-teams for matches to ensure parent is shown
+                    const subs = unitData.subTeams[team.id] || [];
+                    const matchSub = subs.some(sub => 
+                      sub.namaTim.toLowerCase().includes(q) || 
+                      sub.ketua.nama.toLowerCase().includes(q) || 
+                      sub.anggota.some(a => a.nama.toLowerCase().includes(q))
+                    );
+
+                    return matchName || matchKetua || matchAnggota || matchSub;
+                  });
+
+                  if (filteredTopLevel.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-20 bg-white/50 backdrop-blur-sm rounded-2xl border border-dashed border-primary/20">
+                        <div className="h-16 w-16 rounded-full bg-primary/5 flex items-center justify-center mb-4">
+                          <Search className="h-8 w-8 text-primary/40" />
+                        </div>
+                        <h3 className="text-lg font-bold text-muted-foreground">Tidak Ada Hasil</h3>
+                        <p className="text-sm text-muted-foreground/60 mt-1">Coba kata kunci tim atau nama pegawai lain.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid gap-4">
+                      {filteredTopLevel.map((team, tIdx) => {
+                        const subs = (unitData.subTeams[team.id] || []).filter(sub => {
+                          const matchName = sub.namaTim.toLowerCase().includes(q);
+                          const matchKetua = sub.ketua.nama.toLowerCase().includes(q);
+                          const matchAnggota = sub.anggota.some(a => a.nama.toLowerCase().includes(q));
+                          return matchName || matchKetua || matchAnggota;
+                        });
+
+                        return (
+                          <motion.div 
+                            key={team.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: tIdx * 0.05 }}
+                            className="bg-white/60 backdrop-blur-sm rounded-2xl overflow-hidden border border-primary/5 hover:border-primary/20 shadow-sm hover:shadow-md transition-all group"
+                          >
+                            <div 
+                              className="p-5 flex items-center justify-between cursor-pointer"
+                              onClick={() => setSelectedTeamIdForDetails(team.id)}
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className={cn(
+                                  "h-10 w-10 rounded-xl flex items-center justify-center transition-colors",
+                                  team.jenis === 'Bagian' ? "bg-amber-100 text-amber-700" : "bg-primary/10 text-primary"
+                                )}>
+                                  {team.jenis === 'Bagian' ? <Building2 className="h-5 w-5" /> : <Briefcase className="h-5 w-5" />}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="font-bold text-[#1A4A9A] tracking-tight group-hover:text-primary transition-colors">{team.namaTim}</h4>
+                                    <Badge variant="outline" className="text-[8px] font-black uppercase h-4 px-1.5 border-none bg-muted text-muted-foreground">
+                                      {team.jenis}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest mt-0.5">
+                                    {team.ketua.nama} • {team.anggota.length} Anggota
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {subs.length > 0 && (
+                                  <Badge variant="secondary" className="bg-primary/5 text-primary text-[10px] font-bold border-none px-2 py-0.5">
+                                    {subs.length} Sub-Tim
+                                  </Badge>
+                                )}
+                                <div className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground group-hover:bg-primary group-hover:text-white transition-all">
+                                  <ArrowRight className="h-4 w-4" />
+                                </div>
+                              </div>
+                            </div>
+
+                            {subs.length > 0 && (
+                              <div className="bg-primary/5 px-5 py-3 border-t border-primary/5">
+                                <div className="flex flex-wrap gap-2">
+                                  {subs.map(sub => (
+                                    <button
+                                      key={sub.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedTeamIdForDetails(sub.id);
+                                      }}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-lg border border-primary/10 hover:border-primary/30 hover:bg-white/80 transition-all text-[10px] font-bold text-[#1A4A9A]"
+                                    >
+                                      <ArrowRight className="h-3 w-3 text-primary" />
+                                      {sub.namaTim}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  );
+                })() : null}
+              </div>
+            ) : (
+              // Level 3: Team Details
+              <div className="space-y-8">
+                {(() => {
+                  const team = workTeams.find(t => t.id === selectedTeamIdForDetails);
+                  if (!team) return null;
+
+                  return (
+                    <>
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#1A4A9A] text-white p-8 rounded-3xl shadow-xl shadow-primary/20 relative overflow-hidden"
+                      >
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32 blur-3xl" />
+                        <div className="absolute bottom-0 left-0 w-48 h-48 bg-primary/20 rounded-full -ml-24 -mb-24 blur-2xl" />
+                        
+                        <div className="relative flex items-center gap-6">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => setSelectedTeamIdForDetails(null)}
+                            className="rounded-2xl h-14 w-14 p-0 bg-white/10 hover:bg-white hover:text-primary transition-all text-white border border-white/20"
+                          >
+                            <ArrowLeft className="h-6 w-6" />
+                          </Button>
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <Badge variant="outline" className="bg-white/20 text-white border-none font-black text-[9px] px-2 py-0.5 tracking-[0.2em]">
+                                {team.jenis?.toUpperCase() || 'TIM KERJA'}
+                              </Badge>
+                              <span className="text-[10px] text-white/60 font-bold tracking-widest uppercase italic">ID: {team.id.slice(0, 8)}</span>
+                            </div>
+                            <h2 className="text-3xl font-black tracking-tight">{team.namaTim}</h2>
+                            <p className="text-white/70 text-sm mt-1 font-medium italic opacity-80">{team.unitKerja}</p>
+                          </div>
+                        </div>
+
+                        <div className="relative flex items-center gap-1.5 self-end sm:self-center">
+                          <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            className="rounded-xl font-bold bg-white text-primary hover:bg-primary-foreground h-11 px-6 shadow-lg transition-transform active:scale-95"
+                            onClick={() => {
+                              setEditingTeam(team);
+                              setJenisEditTeam(team.jenis || 'Tim Kerja');
+                              setIsEditTeamDialogOpen(true);
+                            }}
+                          >
+                            <UserCog className="h-4 w-4 mr-2" />
+                            Edit Tim
+                          </Button>
+                          <Button 
+                            variant="secondary" 
+                            size="icon" 
+                            className="rounded-xl bg-white/10 text-white hover:bg-destructive hover:text-white border border-white/20 h-11 w-11 transition-all"
+                            onClick={() => {
+                              setDeletingInfo({ id: team.id, type: 'TIM' });
+                              setIsDeleteConfirmOpen(true);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </motion.div>
+
+                      <div className="grid gap-8 lg:grid-cols-3">
+                        <div className="lg:col-span-1 space-y-6">
+                          <div className="bg-white rounded-3xl shadow-sm border border-primary/5 p-6 space-y-6 relative group overflow-hidden">
+                            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform duration-700">
+                              <UserCheck className="h-32 w-32 text-primary" />
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                              <div className="h-1.5 w-8 bg-primary rounded-full" />
+                              <span className="text-[10px] font-black text-primary/60 uppercase tracking-[0.2em]">{team.jenis === 'Bagian' ? 'Pimpinan Bagian' : 'Ketua Tim'}</span>
+                            </div>
+
+                            <div className="flex flex-col items-center text-center space-y-4 relative">
+                              <div className="h-28 w-28 rounded-[2rem] bg-gradient-to-br from-primary/10 to-primary/5 border-4 border-white shadow-xl flex items-center justify-center text-5xl font-black text-primary">
+                                {team.ketua.nama.charAt(0)}
+                              </div>
+                              <div>
+                                <h3 className="text-xl font-black text-[#1A4A9A] tracking-tight whitespace-normal">{team.ketua.nama}</h3>
+                                <p className="text-xs text-muted-foreground font-bold mt-1 mx-auto italic whitespace-normal">{team.ketua.jabatan}</p>
+                              </div>
+                              <Badge className="bg-primary hover:bg-primary font-black rounded-xl px-4 py-1 tracking-widest text-[10px]">
+                                {team.ketua.status.toUpperCase()}
+                              </Badge>
+                            </div>
+
+                            <div className="pt-6 border-t border-dashed space-y-4">
+                              <div className="flex items-center justify-center gap-8">
+                                <div className="text-center">
+                                  <div className="text-lg font-black text-primary">{team.tahun}</div>
+                                  <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Tahun Aktif</div>
+                                </div>
+                                <div className="h-8 w-px bg-muted" />
+                                <div className="text-center">
+                                  <div className="text-lg font-black text-primary">{team.status}</div>
+                                  <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Status Tim</div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="lg:col-span-2 space-y-6">
+                          <div className="bg-white rounded-3xl shadow-sm border border-primary/5 p-6">
+                            <div className="flex items-center justify-between mb-6">
+                              <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-xl bg-primary/5 flex items-center justify-center text-primary">
+                                  <Users className="h-5 w-5" />
+                                </div>
+                                <div>
+                                  <h3 className="text-lg font-black text-[#1A4A9A] tracking-tight">Anggota Tim</h3>
+                                  <p className="text-xs text-muted-foreground uppercase font-black tracking-widest opacity-60">Terdaftar {team.anggota.length} Personel</p>
+                                </div>
+                              </div>
+                              <Button 
+                                className="rounded-xl h-10 px-5 font-black text-[10px] tracking-widest shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95"
+                                onClick={() => {
+                                  setSelectedTeamForMember(team.id);
+                                  setIsAddMemberDialogOpen(true);
+                                }}
+                              >
+                                <Plus className="h-4 w-4 mr-2" />
+                                TAMBAH ANGGOTA
+                              </Button>
+                            </div>
+
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {team.anggota.length > 0 ? (
+                                team.anggota.map((member, idx) => (
+                                  <motion.div 
+                                    key={member.nama + idx}
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: idx * 0.05 }}
+                                    className="p-4 rounded-2xl bg-muted/20 border border-transparent hover:border-primary/20 hover:bg-white hover:shadow-md transition-all group/member flex items-center justify-between"
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className="h-10 w-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-xs font-black text-primary/40 group-hover/member:bg-primary group-hover/member:text-white transition-all">
+                                        {idx + 1}
+                                      </div>
+                                      <div className="flex flex-col min-w-0">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="text-sm font-black text-[#1A4A9A] tracking-tight whitespace-normal">{member.nama}</span>
+                                          <Badge className="text-[8px] h-3.5 px-1 bg-muted-foreground/10 text-muted-foreground border-none font-bold shrink-0">
+                                            {member.status}
+                                          </Badge>
+                                        </div>
+                                        <span className="text-[10px] text-muted-foreground font-medium italic whitespace-normal mt-0.5">{member.jabatan}</span>
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-1 opacity-0 group-hover/member:opacity-100 transition-all transform translate-x-2 group-hover/member:translate-x-0">
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="h-8 w-8 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/5"
+                                        onClick={() => {
+                                          setEditingMemberInfo({ 
+                                            teamId: team.id, 
+                                            member: member, 
+                                            index: idx 
+                                          });
+                                          setIsEditMemberDialogOpen(true);
+                                        }}
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/5"
+                                        onClick={() => {
+                                          handleRemoveMember(team.id, member.nama);
+                                        }}
+                                      >
+                                        <X className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  </motion.div>
+                                ))
+                              ) : (
+                                <div className="sm:col-span-2 flex flex-col items-center justify-center py-16 bg-muted/10 border border-dashed border-primary/10 rounded-3xl mt-4">
+                                  <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                                    <Users className="h-6 w-6 text-muted-foreground/30" />
+                                  </div>
+                                  <h4 className="text-sm font-black text-muted-foreground uppercase tracking-widest">Daftar Anggota Kosong</h4>
+                                  <p className="text-[10px] font-medium text-muted-foreground/60 mt-1">Gunakan tombol di atas untuk menambahkan anggota baru.</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
         ) : activeTab === 'skp' ? (
-          <>
-            {/* Stats Grid */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-8">
+            {/* Stats Header */}
+            <div className="grid gap-6 md:grid-cols-3">
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.1 }}
+                className="bg-white rounded-[2rem] p-6 shadow-xl shadow-primary/5 border border-primary/5 relative overflow-hidden group"
               >
-                <Card className="overflow-hidden border-none shadow-sm hover:shadow-md transition-shadow">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Total Berkas SKP</CardTitle>
-                    <Users className="h-4 w-4 text-primary" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold">{stats.total}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Seluruh data pegawai terdaftar</p>
-                  </CardContent>
-                </Card>
+                <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                  <Archive className="h-24 w-24 text-primary" />
+                </div>
+                <div className="relative z-10">
+                  <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+                    <Archive className="h-6 w-6 text-primary" />
+                  </div>
+                  <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest leading-none mb-2">Total Berkas</h3>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-black text-[#1A4A9A] tracking-tighter">{stats.total}</span>
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Arsip</span>
+                  </div>
+                </div>
               </motion.div>
 
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.2 }}
+                className="bg-white rounded-[2rem] p-6 shadow-xl shadow-emerald-500/5 border border-emerald-500/10 relative overflow-hidden group"
               >
-                <Card className="overflow-hidden border-none shadow-sm hover:shadow-md transition-shadow">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Sudah Diambil</CardTitle>
-                    <FileCheck className="h-4 w-4 text-emerald-500" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold text-emerald-600">{stats.sudahDiambil}</div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                        <div 
-                          className="h-full bg-emerald-500 transition-all duration-500" 
-                          style={{ width: `${(stats.sudahDiambil / stats.total) * 100}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] font-bold text-emerald-600">
-                        {Math.round((stats.sudahDiambil / stats.total) * 100)}%
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
+                <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                  <CheckCircle2 className="h-24 w-24 text-emerald-500" />
+                </div>
+                <div className="relative z-10">
+                  <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-4">
+                    <FileCheck className="h-6 w-6 text-emerald-500" />
+                  </div>
+                  <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest leading-none mb-2">Sudah Diambil</h3>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-black text-emerald-600 tracking-tighter">{stats.sudahDiambil}</span>
+                    <Badge className="bg-emerald-500/10 text-emerald-600 border-none font-black text-[10px] tracking-widest">
+                      {Math.round((stats.sudahDiambil / (stats.total || 1)) * 100)}%
+                    </Badge>
+                  </div>
+                </div>
               </motion.div>
 
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.3 }}
+                className="bg-white rounded-[2rem] p-6 shadow-xl shadow-amber-500/5 border border-amber-500/10 relative overflow-hidden group"
               >
-                <Card className="overflow-hidden border-none shadow-sm hover:shadow-md transition-shadow">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Belum Diambil</CardTitle>
-                    <FileClock className="h-4 w-4 text-amber-500" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold text-amber-600">{stats.belumDiambil}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Menunggu proses pengambilan</p>
-                  </CardContent>
-                </Card>
+                <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                  <Clock className="h-24 w-24 text-amber-500" />
+                </div>
+                <div className="relative z-10">
+                  <div className="h-12 w-12 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-4">
+                    <FileClock className="h-6 w-6 text-amber-500" />
+                  </div>
+                  <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest leading-none mb-2">Belum Diambil</h3>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-black text-amber-600 tracking-tighter">{stats.belumDiambil}</span>
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Menunggu</span>
+                  </div>
+                </div>
               </motion.div>
             </div>
 
-            {/* Filters & Table */}
-            <Card className="border-none shadow-sm overflow-hidden">
-              <CardHeader className="bg-white border-b pb-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Main Content Area */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white/80 backdrop-blur-md rounded-[2.5rem] shadow-xl shadow-primary/5 border border-primary/5 overflow-hidden"
+            >
+              <div className="p-8 border-b border-primary/5 bg-gradient-to-r from-primary/[0.02] to-transparent">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
-                    <CardTitle>Daftar Berkas SKP</CardTitle>
-                    <CardDescription>Kelola dan pantau status pengambilan berkas SKP pegawai.</CardDescription>
+                    <h2 className="text-2xl font-black text-[#1A4A9A] tracking-tight">Arsip Berkas SKP</h2>
+                    <p className="text-muted-foreground font-medium mt-1 uppercase tracking-widest text-[10px]">Manajemen Pengambilan Berkas Hasil Penilaian Kinerja</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="relative w-full md:w-64">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <div className="relative group w-full md:w-72">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-primary/40 group-focus-within:text-primary transition-colors" />
                       <Input 
-                        placeholder="Cari Nama, NIP, atau Unit..." 
-                        className="pl-9 bg-muted/50 border-none focus-visible:ring-1"
+                        placeholder="Nama, NIP, atau Unit..." 
+                        className="pl-11 h-12 rounded-2xl bg-primary/[0.03] border-none focus-visible:ring-2 focus-visible:ring-primary/20 transition-all font-medium text-sm"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                       />
                     </div>
                     <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger className="w-[160px] bg-muted/50 border-none">
-                        <Filter className="h-4 w-4 mr-2 opacity-50" />
-                        <SelectValue placeholder="Filter Status" />
+                      <SelectTrigger className="w-[180px] h-12 rounded-2xl bg-primary/[0.03] border-none font-bold text-xs uppercase tracking-widest px-4">
+                        <div className="flex items-center gap-2">
+                          <Filter className="h-4 w-4 text-primary/40" />
+                          <SelectValue placeholder="Semua Status" />
+                        </div>
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Semua Status</SelectItem>
-                        <SelectItem value="Belum Diambil">Belum Diambil</SelectItem>
-                        <SelectItem value="Sudah Diambil">Sudah Diambil</SelectItem>
+                      <SelectContent className="rounded-2xl border-primary/5 shadow-xl">
+                        <SelectItem value="all" className="font-bold text-xs uppercase tracking-widest py-3">Semua Status</SelectItem>
+                        <SelectItem value="Belum Diambil" className="font-bold text-xs uppercase tracking-widest py-3 text-amber-600">Belum Diambil</SelectItem>
+                        <SelectItem value="Sudah Diambil" className="font-bold text-xs uppercase tracking-widest py-3 text-emerald-600">Sudah Diambil</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
+              </div>
+
+              <div className="p-4 overflow-x-auto custom-scrollbar">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Pegawai / Identitas</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Periode</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6 text-center">Status</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Keterangan</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6 text-right">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRecords.map((record, rIdx) => (
+                      <motion.tr
+                        key={record.id}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: rIdx * 0.05 }}
+                        className="group border-none hover:bg-primary/[0.02] transition-colors rounded-2xl"
+                      >
+                        <TableCell className="py-5 pl-4">
+                          <div className="flex items-center gap-4">
+                            <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/5 to-primary/10 flex items-center justify-center text-[#1A4A9A] font-black group-hover:scale-110 transition-transform">
+                              {record.namaPegawai.charAt(0)}
+                            </div>
+                            <div className="flex flex-col min-w-0">
+                              <button 
+                                onClick={() => {
+                                  setDetailRecord(record);
+                                  setIsDetailDialogOpen(true);
+                                }}
+                                className="text-left group/name"
+                              >
+                                <span className="font-black text-sm text-[#1A4A9A] group-hover/name:text-primary transition-colors block leading-tight">{record.namaPegawai}</span>
+                              </button>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest break-all line-clamp-1">{record.jabatan}</span>
+                              </div>
+                              <span className="text-[9px] font-mono text-primary/40 font-bold mt-1">NIP. {record.nip}</span>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-black text-[#1A4A9A] tracking-tighter">{record.tahun}</span>
+                            <Badge className="w-fit text-[8px] h-4 px-1.5 font-black uppercase tracking-widest bg-primary/10 text-primary border-none">
+                              {record.periode}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex flex-col items-center gap-1.5">
+                            <Badge className={cn(
+                              "rounded-full px-4 py-1 text-[9px] font-black uppercase tracking-widest border-none ring-1",
+                              record.status === 'Sudah Diambil' 
+                                ? "bg-emerald-50 text-emerald-600 ring-emerald-500/20" 
+                                : "bg-amber-50 text-amber-600 ring-amber-500/20"
+                            )}>
+                              {record.status}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {record.status === 'Sudah Diambil' ? (
+                            <div className="bg-primary/[0.03] p-3 rounded-2xl border border-primary/5">
+                              <div className="flex items-center gap-2 mb-1.5">
+                                <UserCheck className="h-3 w-3 text-primary/40" />
+                                <span className="text-[10px] font-black text-primary/80 uppercase">{record.pengambil}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Calendar className="h-3 w-3 text-primary/40" />
+                                <span className="text-[9px] font-bold text-primary/60">
+                                  {record.tanggalAmbil && format(new Date(record.tanggalAmbil), 'dd MMM yyyy, HH:mm', { locale: id })}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 text-muted-foreground/40 italic text-[10px] font-medium justify-center">
+                              <Clock className="h-3.5 w-3.5" />
+                              Belum ada data pengambilan
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right pr-4">
+                          <div className="flex items-center justify-end gap-2">
+                            {record.status === 'Belum Diambil' ? (
+                              <Button 
+                                size="sm" 
+                                className="h-9 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-[10px] tracking-widest px-4 gap-2 shadow-lg shadow-emerald-500/20"
+                                onClick={() => {
+                                  setSelectedRecord(record);
+                                  setIsTakeDialogOpen(true);
+                                }}
+                              >
+                                <FileCheck className="h-3.5 w-3.5" /> AMBIL
+                              </Button>
+                            ) : (
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-9 w-9 rounded-xl hover:bg-primary/5 text-primary/40 hover:text-primary transition-all opacity-0 group-hover:opacity-100"
+                                onClick={() => {
+                                  setEditingRecord(record);
+                                  setIsEditDialogOpen(true);
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button 
+                              size="icon" 
+                              variant="ghost" 
+                              className="h-9 w-9 rounded-xl hover:bg-destructive/5 text-destructive/40 hover:text-destructive transition-all opacity-0 group-hover:opacity-100"
+                              onClick={() => handleDeleteRecord(record.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </motion.tr>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </motion.div>
+          </div>
+        ) : activeTab === 'skp-monitoring' ? (
+          <div className="space-y-8">
+            {/* Monitoring Stats - Bento Grid Style */}
+            {!monitoringSelectedEmployee && (
+              <div className="grid gap-6 md:grid-cols-4">
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 }}>
+                  <div className="bg-emerald-50/50 backdrop-blur-sm border border-emerald-100 p-6 rounded-[2rem] hover:shadow-lg hover:shadow-emerald-500/5 transition-all group">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="h-10 w-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600">
+                        <TrendingUp className="h-5 w-5" />
+                      </div>
+                      <span className="text-[10px] font-black text-emerald-600/60 uppercase tracking-[0.2em]">Rating A</span>
+                    </div>
+                    <div className="text-4xl font-black text-emerald-900 tracking-tighter">{skpMonitoringStats.sangatBaik}</div>
+                    <p className="text-xs font-bold text-emerald-700 uppercase tracking-widest mt-1">Sangat Baik</p>
+                  </div>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }}>
+                  <div className="bg-blue-50/50 backdrop-blur-sm border border-blue-100 p-6 rounded-[2rem] hover:shadow-lg hover:shadow-blue-500/5 transition-all group">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+                      <span className="text-[10px] font-black text-blue-600/60 uppercase tracking-[0.2em]">Rating B</span>
+                    </div>
+                    <div className="text-4xl font-black text-blue-900 tracking-tighter">{skpMonitoringStats.baik}</div>
+                    <p className="text-xs font-bold text-blue-700 uppercase tracking-widest mt-1">Baik</p>
+                  </div>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.3 }}>
+                  <div className="bg-amber-50/50 backdrop-blur-sm border border-amber-100 p-6 rounded-[2rem] hover:shadow-lg hover:shadow-amber-500/5 transition-all group">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="h-10 w-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600">
+                        <AlertTriangle className="h-5 w-5" />
+                      </div>
+                      <span className="text-[10px] font-black text-amber-600/60 uppercase tracking-[0.2em]">Rating C</span>
+                    </div>
+                    <div className="text-4xl font-black text-amber-900 tracking-tighter">{skpMonitoringStats.butuhPerbaikan}</div>
+                    <p className="text-xs font-bold text-amber-700 uppercase tracking-widest mt-1">Butuh Perbaikan</p>
+                  </div>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4 }}>
+                  <div className="bg-red-50/50 backdrop-blur-sm border border-red-100 p-6 rounded-[2rem] hover:shadow-lg hover:shadow-red-500/5 transition-all group">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="h-10 w-10 rounded-xl bg-red-100 flex items-center justify-center text-red-600">
+                        <XCircle className="h-5 w-5" />
+                      </div>
+                      <span className="text-[10px] font-black text-red-600/60 uppercase tracking-[0.2em]">Rating D/E</span>
+                    </div>
+                    <div className="text-4xl font-black text-red-900 tracking-tighter">{skpMonitoringStats.kurang}</div>
+                    <p className="text-xs font-bold text-red-700 uppercase tracking-widest mt-1">Kurang</p>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+
+            {/* Monitoring List / Profile View */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-[2.5rem] shadow-xl shadow-primary/5 border border-primary/5 overflow-hidden"
+            >
+              <div className="p-8 border-b border-primary/5 bg-gradient-to-r from-primary/[0.01] to-transparent">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="flex items-center gap-6">
+                    {monitoringSelectedEmployee && (
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="rounded-2xl h-12 w-12 bg-primary/5 hover:bg-primary/10 text-primary transition-all"
+                        onClick={() => setMonitoringSelectedEmployee(null)}
+                      >
+                        <ArrowLeft className="h-5 w-5" />
+                      </Button>
+                    )}
+                    <div>
+                      <h2 className="text-2xl font-black text-[#1A4A9A] tracking-tight">
+                        {monitoringSelectedEmployee 
+                          ? `Riwayat SKP: ${selectedEmployeeHistory[0]?.namaPegawai || 'Pegawai'}` 
+                          : 'Monitoring Rating SKP'}
+                      </h2>
+                      <p className="text-muted-foreground font-medium mt-1 uppercase tracking-widest text-[10px]">
+                        {monitoringSelectedEmployee 
+                          ? `NIP. ${selectedEmployeeHistory[0]?.nip || '-'} • ${selectedEmployeeHistory[0]?.unitKerja || '-'}`
+                          : 'Visualisasi Capaian dan Grafik Penilaian Kinerja Pegawai'}
+                      </p>
+                    </div>
+                  </div>
+                  {!monitoringSelectedEmployee && (
+                    <div className="relative group w-full md:w-80">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-primary/40 group-focus-within:text-primary transition-colors" />
+                      <Input 
+                        placeholder="Cari Pegawai..." 
+                        className="pl-11 h-12 rounded-2xl bg-primary/[0.03] border-none focus-visible:ring-2 focus-visible:ring-primary/20 transition-all font-bold text-xs uppercase tracking-widest"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 overflow-x-auto custom-scrollbar">
+                {!monitoringSelectedEmployee ? (
                   <Table>
-                    <TableHeader className="bg-muted/30">
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead className="w-[120px] font-bold text-xs uppercase tracking-wider">Tahun & Periode</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Pegawai</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Status</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Keterangan Pengambilan</TableHead>
-                        <TableHead className="text-right font-bold text-xs uppercase tracking-wider">Aksi</TableHead>
+                    <TableHeader>
+                      <TableRow className="border-none hover:bg-transparent">
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Pegawai</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Unit Kerja</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Predikat Terakhir</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6 text-right">Aksi</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {isAuthLoading ? (
-                        <TableRow>
-                          <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                            Memuat data...
-                          </TableCell>
-                        </TableRow>
-                      ) : !user ? (
-                        <TableRow>
-                          <TableCell colSpan={6} className="h-32 text-center">
-                            <div className="flex flex-col items-center gap-2">
-                              <p className="text-muted-foreground">Silakan masuk untuk melihat data.</p>
-                              <Button size="sm" onClick={handleLogin}>Masuk dengan Google</Button>
+                      {uniqueEmployeesForMonitoring.map((emp, eIdx) => (
+                        <motion.tr 
+                          key={emp.nip || emp.namaPegawai} 
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: eIdx * 0.05 }}
+                          className="group border-none hover:bg-primary/[0.02] transition-colors cursor-pointer" 
+                          onClick={() => setMonitoringSelectedEmployee(emp.nip || emp.namaPegawai)}
+                        >
+                          <TableCell className="py-5">
+                            <div className="flex items-center gap-4">
+                              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/5 to-primary/10 flex items-center justify-center text-[#1A4A9A] font-black uppercase text-sm">
+                                {emp.namaPegawai.charAt(0)}
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="font-black text-sm text-[#1A4A9A] leading-tight group-hover:text-primary transition-colors">{emp.namaPegawai}</span>
+                                <span className="text-[10px] font-mono font-bold text-primary/40 mt-1">NIP. {emp.nip}</span>
+                              </div>
                             </div>
                           </TableCell>
-                        </TableRow>
-                      ) : (
-                        <AnimatePresence mode="popLayout">
-                          {filteredRecords.length > 0 ? (
-                            filteredRecords.map((record) => (
-                              <motion.tr
-                                key={record.id}
-                                layout
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                className="group hover:bg-muted/20 transition-colors"
-                              >
-                                <TableCell>
-                                  <div className="flex flex-col">
-                                    <span className="font-mono text-sm font-medium">{record.tahun}</span>
-                                    <span className="text-[10px] text-muted-foreground font-bold uppercase">{record.periode}</span>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-col">
-                                    <button 
-                                      onClick={() => {
-                                        setDetailRecord(record);
-                                        setIsDetailDialogOpen(true);
-                                      }}
-                                      className="text-left hover:text-primary hover:underline transition-colors"
-                                    >
-                                      <span className="font-semibold text-sm">{record.namaPegawai}</span>
-                                    </button>
-                                    <span className="text-[10px] text-muted-foreground font-medium">{record.jabatan}</span>
-                                    <span className="text-[10px] text-muted-foreground font-mono">{record.nip}</span>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                    {record.unitKerja}
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge 
-                                    variant={record.status === 'Sudah Diambil' ? 'default' : 'secondary'}
-                                    className={cn(
-                                      "rounded-full px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-                                      record.status === 'Sudah Diambil' 
-                                        ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" 
-                                        : "bg-amber-100 text-amber-700 hover:bg-amber-100"
-                                    )}
-                                  >
-                                    {record.status === 'Sudah Diambil' ? (
-                                      <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    ) : (
-                                      <XCircle className="h-3 w-3 mr-1" />
-                                    )}
-                                    {record.status}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell>
-                                  {record.status === 'Sudah Diambil' ? (
-                                    <div className="flex flex-col gap-1">
-                                      <div className="flex items-center gap-1.5 text-xs font-medium">
-                                        <User className="h-3 w-3 text-muted-foreground" />
-                                        {record.pengambil}
-                                      </div>
-                                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                                        <CalendarIcon className="h-3 w-3" />
-                                        {record.tanggalAmbil && format(new Date(record.tanggalAmbil), 'dd MMM yyyy, HH:mm', { locale: id })}
-                                      </div>
-                                      <div className="text-[10px] text-muted-foreground italic">
-                                        Unit: {record.unitKerjaPengambil}
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground italic">Belum ada data</span>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex items-center justify-end gap-1">
-                                    {record.status === 'Belum Diambil' ? (
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline"
-                                        className="h-8 text-xs gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
-                                        onClick={() => {
-                                          setSelectedRecord(record);
-                                          setIsTakeDialogOpen(true);
-                                        }}
-                                      >
-                                        <FileCheck className="h-3.5 w-3.5" />
-                                        Ambil Berkas
-                                      </Button>
-                                    ) : (
-                                      <Button 
-                                        size="icon" 
-                                        variant="ghost" 
-                                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                        onClick={() => {
-                                          setEditingRecord(record);
-                                          setIsEditDialogOpen(true);
-                                        }}
-                                      >
-                                        <UserCog className="h-4 w-4" />
-                                      </Button>
-                                    )}
-                                    <Button 
-                                      size="icon" 
-                                      variant="ghost" 
-                                      className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                                      onClick={() => handleDeleteRecord(record.id)}
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </motion.tr>
-                            ))
-                          ) : (
-                            <TableRow>
-                              <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                                Tidak ada data yang ditemukan.
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </AnimatePresence>
-                      )}
+                          <TableCell>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">{emp.unitKerja}</span>
+                          </TableCell>
+                          <TableCell>
+                            {emp.latestPredikat ? (
+                              <div className="flex items-center gap-2">
+                                <div className={cn(
+                                  "h-2 w-2 rounded-full",
+                                  emp.latestPredikat === 'Sangat Baik' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" :
+                                  emp.latestPredikat === 'Baik' ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]" :
+                                  emp.latestPredikat === 'Butuh Perbaikan' ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]" : 
+                                  "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]"
+                                )} />
+                                <span className="font-black text-xs uppercase tracking-tight text-[#1A4A9A]">{emp.latestPredikat}</span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground font-medium italic opacity-40">Belum ada data</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button size="sm" variant="ghost" className="rounded-xl h-9 font-black text-[9px] uppercase tracking-[0.2em] text-primary/60 hover:text-primary hover:bg-primary/5 px-4">
+                              Detail Riwayat
+                            </Button>
+                          </TableCell>
+                        </motion.tr>
+                      ))}
                     </TableBody>
                   </Table>
-                </div>
-              </CardContent>
-            </Card>
-          </>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-none hover:bg-transparent">
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6 text-center">Tahun</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Hasil Kerja</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Perilaku</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Predikat Akhir</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6 text-right">Aksi</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedEmployeeHistory.map((record, rIdx) => (
+                        <motion.tr 
+                          key={record.id} 
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: rIdx * 0.1 }}
+                          className="group border-none hover:bg-primary/[0.02] transition-colors"
+                        >
+                          <TableCell className="text-center py-6">
+                            <div className="flex flex-col items-center">
+                              <span className="text-lg font-black text-[#1A4A9A] tracking-tighter leading-none">{record.tahun}</span>
+                              <Badge className="mt-1 h-4 px-1.5 text-[8px] font-black uppercase tracking-widest bg-primary/5 text-primary border-none">
+                                {record.periode}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {record.ratingHasilKerja ? (
+                              <Badge className="bg-emerald-50 text-emerald-600 border-none text-[9px] font-black uppercase tracking-widest py-1 px-3">
+                                {record.ratingHasilKerja}
+                              </Badge>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground opacity-40 italic">Kosong</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {record.ratingHasilPerilaku ? (
+                              <Badge className="bg-indigo-50 text-indigo-600 border-none text-[9px] font-black uppercase tracking-widest py-1 px-3">
+                                {record.ratingHasilPerilaku}
+                              </Badge>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground opacity-40 italic">Kosong</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {record.predikatKinerja ? (
+                              <div className="flex items-center gap-2">
+                                <div className={cn(
+                                  "h-2 w-2 rounded-full",
+                                  record.predikatKinerja === 'Sangat Baik' ? "bg-emerald-500" :
+                                  record.predikatKinerja === 'Baik' ? "bg-blue-500" :
+                                  record.predikatKinerja === 'Butuh Perbaikan' ? "bg-amber-500" : "bg-red-500"
+                                )} />
+                                <span className="font-black text-xs uppercase tracking-tight text-[#1A4A9A]">{record.predikatKinerja}</span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground opacity-40 font-bold">Menunggu...</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-9 w-9 rounded-xl hover:bg-primary/5 text-primary/40 hover:text-primary"
+                                onClick={() => {
+                                  setEditingMonitoringRecord(record);
+                                  setIsEditMonitoringDialogOpen(true);
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-9 w-9 rounded-xl hover:bg-destructive/5 text-destructive/40 hover:text-destructive"
+                                onClick={() => {
+                                  setDeletingInfo({ id: record.id!, type: 'SKP_MONITORING' });
+                                  setIsDeleteConfirmOpen(true);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </motion.tr>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            </motion.div>
+          </div>
         ) : activeTab === 'plt-plh' ? (
           <div className="space-y-8">
-            {/* PLT/PLH Stats Grid */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-                <Card 
+            {/* PLT/PLH Stats Grid - Bento Style */}
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 }}>
+                <div 
                   className={cn(
-                    "overflow-hidden border-none shadow-sm hover:shadow-md transition-all cursor-pointer",
-                    statusFilterPlt === 'all' ? "ring-2 ring-primary ring-offset-2" : ""
+                    "bg-white rounded-[2rem] p-6 shadow-xl transition-all cursor-pointer border border-primary/5 relative overflow-hidden group",
+                    statusFilterPlt === 'all' ? "ring-2 ring-primary ring-offset-4" : "shadow-primary/5"
                   )}
                   onClick={() => setStatusFilterPlt('all')}
                 >
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Total PLT</CardTitle>
-                    <UserCog className="h-4 w-4 text-primary" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold">{pltPlhStats.totalPlt}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Pelaksana Tugas terdaftar</p>
-                  </CardContent>
-                </Card>
+                  <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:scale-110 transition-transform duration-500">
+                    <UserCog className="h-20 w-20 text-primary" />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 text-primary">
+                      <UserCog className="h-6 w-6" />
+                    </div>
+                    <h3 className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-2">Total PLT</h3>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-4xl font-black text-[#1A4A9A] tracking-tighter">{pltPlhStats.totalPlt}</span>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
 
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-                <Card 
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }}>
+                <div 
                   className={cn(
-                    "overflow-hidden border-none shadow-sm hover:shadow-md transition-all cursor-pointer",
-                    statusFilterPlt === 'Aktif' ? "ring-2 ring-emerald-500 ring-offset-2" : ""
+                    "bg-white rounded-[2rem] p-6 shadow-xl transition-all cursor-pointer border border-emerald-500/5 relative overflow-hidden group",
+                    statusFilterPlt === 'Aktif' ? "ring-2 ring-emerald-500 ring-offset-4" : "shadow-emerald-500/5"
                   )}
                   onClick={() => setStatusFilterPlt(statusFilterPlt === 'Aktif' ? 'all' : 'Aktif')}
                 >
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">PLT Aktif</CardTitle>
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold text-emerald-600">{pltPlhStats.activePlt}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Sedang menjabat</p>
-                  </CardContent>
-                </Card>
+                  <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                    <CheckCircle2 className="h-20 w-20 text-emerald-500" />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-4 text-emerald-600">
+                      <CheckCircle2 className="h-6 w-6" />
+                    </div>
+                    <h3 className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-2">PLT Aktif</h3>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-4xl font-black text-emerald-600 tracking-tighter">{pltPlhStats.activePlt}</span>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
 
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-                <Card 
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.3 }}>
+                <div 
                   className={cn(
-                    "overflow-hidden border-none shadow-sm hover:shadow-md transition-all cursor-pointer",
-                    statusFilterPlh === 'all' ? "ring-2 ring-blue-500 ring-offset-2" : ""
+                    "bg-white rounded-[2rem] p-6 shadow-xl transition-all cursor-pointer border border-blue-500/5 relative overflow-hidden group",
+                    statusFilterPlh === 'all' ? "ring-2 ring-blue-500 ring-offset-4" : "shadow-blue-500/5"
                   )}
                   onClick={() => setStatusFilterPlh('all')}
                 >
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Total PLH</CardTitle>
-                    <UserCheck className="h-4 w-4 text-blue-500" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold text-blue-600">{pltPlhStats.totalPlh}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Pelaksana Harian terdaftar</p>
-                  </CardContent>
-                </Card>
+                  <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                    <UserCheck className="h-20 w-20 text-blue-500" />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="h-12 w-12 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-4 text-blue-600">
+                      <UserCheck className="h-6 w-6" />
+                    </div>
+                    <h3 className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-2">Total PLH</h3>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-4xl font-black text-blue-600 tracking-tighter">{pltPlhStats.totalPlh}</span>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
 
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-                <Card 
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4 }}>
+                <div 
                   className={cn(
-                    "overflow-hidden border-none shadow-sm hover:shadow-md transition-all cursor-pointer",
-                    statusFilterPlh === 'Aktif' ? "ring-2 ring-blue-400 ring-offset-2" : ""
+                    "bg-white rounded-[2rem] p-6 shadow-xl transition-all cursor-pointer border border-sky-500/5 relative overflow-hidden group",
+                    statusFilterPlh === 'Aktif' ? "ring-2 ring-sky-500 ring-offset-4" : "shadow-sky-500/5"
                   )}
                   onClick={() => setStatusFilterPlh(statusFilterPlh === 'Aktif' ? 'all' : 'Aktif')}
                 >
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">PLH Aktif</CardTitle>
-                    <CheckCircle2 className="h-4 w-4 text-blue-400" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold text-blue-500">{pltPlhStats.activePlh}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Sedang menjabat</p>
-                  </CardContent>
-                </Card>
+                  <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                    <Clock className="h-20 w-20 text-sky-500" />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="h-12 w-12 rounded-2xl bg-sky-500/10 flex items-center justify-center mb-4 text-sky-600">
+                      <Clock className="h-6 w-6" />
+                    </div>
+                    <h3 className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none mb-2">PLH Aktif</h3>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-4xl font-black text-sky-600 tracking-tighter">{pltPlhStats.activePlh}</span>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             </div>
 
-            {/* PLT/PLH Chart */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
-              <Card className="border-none shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-lg">Grafik Penugasan PLT & PLH per Tahun</CardTitle>
-                  <CardDescription>Perbandingan jumlah penugasan Pelaksana Tugas dan Pelaksana Harian.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[300px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={chartDataPltPlh}
-                        margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                        <XAxis 
-                          dataKey="year" 
-                          axisLine={false} 
-                          tickLine={false} 
-                          tick={{ fill: '#666', fontSize: 12 }}
-                          dy={10}
-                        />
-                        <YAxis 
-                          axisLine={false} 
-                          tickLine={false} 
-                          tick={{ fill: '#666', fontSize: 12 }}
-                        />
-                        <Tooltip 
-                          cursor={{ fill: '#f8f9fa' }}
-                          contentStyle={{ 
-                            borderRadius: '8px', 
-                            border: 'none', 
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)' 
-                          }}
-                        />
-                        <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ paddingBottom: '20px' }} />
-                        <Bar 
-                          dataKey="PLT" 
-                          fill="#1A4A9A" 
-                          radius={[4, 4, 0, 0]} 
-                          barSize={30}
-                        />
-                        <Bar 
-                          dataKey="PLH" 
-                          fill="#3b82f6" 
-                          radius={[4, 4, 0, 0]} 
-                          barSize={30}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
+            {/* PLT/PLH Chart Section */}
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              transition={{ delay: 0.5 }}
+              className="bg-white rounded-[2.5rem] shadow-xl shadow-primary/5 border border-primary/5 overflow-hidden"
+            >
+              <div className="p-8 border-b border-primary/5 bg-gradient-to-r from-primary/[0.01] to-transparent">
+                <h3 className="text-xl font-black text-[#1A4A9A] tracking-tight">Tren Penugasan Tahunan</h3>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1">Perbandingan Distribusi Beban Kerja PLT & PLH Berdasarkan Tahun SK</p>
+              </div>
+              <div className="p-8">
+                <div className="h-[350px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={chartDataPltPlh}
+                      margin={{ top: 20, right: 30, left: 10, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                      <XAxis 
+                        dataKey="year" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fill: '#64748B', fontSize: 11, fontWeight: 700 }}
+                        dy={10}
+                      />
+                      <YAxis 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fill: '#64748B', fontSize: 11, fontWeight: 700 }}
+                      />
+                      <Tooltip 
+                        cursor={{ fill: '#F1F5F9' }}
+                        contentStyle={{ 
+                          borderRadius: '1.5rem', 
+                          border: '1px solid rgba(26,74,154,0.1)', 
+                          boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+                          backdropFilter: 'blur(8px)',
+                          background: 'rgba(255,255,255,0.9)'
+                        }}
+                      />
+                      <Legend 
+                        verticalAlign="top" 
+                        align="right" 
+                        iconType="circle" 
+                        wrapperStyle={{ paddingBottom: '30px', fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }} 
+                      />
+                      <Bar 
+                        dataKey="PLT" 
+                        fill="#1A4A9A" 
+                        radius={[6, 6, 0, 0]} 
+                        barSize={32}
+                      />
+                      <Bar 
+                        dataKey="PLH" 
+                        fill="#60A5FA" 
+                        radius={[6, 6, 0, 0]} 
+                        barSize={32}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </motion.div>
 
             {/* PLT Table */}
-            <Card className="border-none shadow-sm overflow-hidden">
-              <CardHeader className="bg-white border-b pb-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              transition={{ delay: 0.6 }}
+              className="bg-white rounded-[2.5rem] shadow-xl shadow-primary/5 border border-primary/5 overflow-hidden"
+            >
+              <div className="p-8 border-b border-primary/5 bg-gradient-to-r from-primary/[0.01] to-transparent">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
-                    <CardTitle>Daftar Pelaksana Tugas (PLT)</CardTitle>
-                    <CardDescription>Monitoring penugasan Pelaksana Tugas di lingkungan BSKJI.</CardDescription>
+                    <h3 className="text-xl font-black text-[#1A4A9A] tracking-tight">Monitoring Pelaksana Tugas (PLT)</h3>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1">Daftar Penugasan Jabatan Sementara Seluruh Unit Kerja BSKJI</p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                    <div className="relative w-full md:w-64">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative group w-full md:w-64">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-primary/40 group-focus-within:text-primary transition-colors" />
                       <Input 
-                        placeholder="Cari PLT..." 
-                        className="pl-9 bg-muted/50 border-none focus-visible:ring-1"
+                        placeholder="Nama atau NIP..." 
+                        className="pl-11 h-12 rounded-2xl bg-primary/[0.03] border-none focus-visible:ring-2 focus-visible:ring-primary/20 transition-all font-bold text-xs uppercase tracking-widest"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                       />
                     </div>
                     <Select value={yearFilterPltPlh} onValueChange={setYearFilterPltPlh}>
-                      <SelectTrigger className="w-full md:w-[130px] bg-muted/50 border-none h-10">
+                      <SelectTrigger className="w-full md:w-[130px] h-12 rounded-2xl bg-primary/[0.03] border-none font-bold text-[10px] uppercase tracking-widest px-4">
                         <div className="flex items-center gap-2">
-                          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                          <Filter className="h-4 w-4 text-primary/40" />
                           <SelectValue placeholder="Tahun" />
                         </div>
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Semua Tahun</SelectItem>
+                      <SelectContent className="rounded-2xl border-primary/5 shadow-xl">
+                        <SelectItem value="all" className="font-bold text-[10px] uppercase tracking-widest py-3">Semua Tahun</SelectItem>
                         {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(year => (
-                          <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
+                          <SelectItem key={year} value={year.toString()} className="font-bold text-[10px] uppercase tracking-widest py-3">{year}</SelectItem>
                         ))}
-                      </SelectContent>
-                    </Select>
-                    <Select value={statusFilterPlt} onValueChange={setStatusFilterPlt}>
-                      <SelectTrigger className="w-full md:w-[130px] bg-muted/50 border-none h-10">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-                          <SelectValue placeholder="Status" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Semua Status</SelectItem>
-                        <SelectItem value="Aktif">Aktif</SelectItem>
-                        <SelectItem value="Selesai">Selesai</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader className="bg-muted/30">
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Pegawai</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Penugasan</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja (Asal/Tugas)</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Periode</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Status</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider text-right">Aksi</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredPltRecords.length > 0 ? (
-                        filteredPltRecords.map((record) => (
-                          <TableRow key={record.id} className="group hover:bg-muted/20 transition-colors">
-                            <TableCell>
+              </div>
+              <div className="p-4 overflow-x-auto custom-scrollbar">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Pegawai / Identitas</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Penugasan PLT</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Unit Asal & Tugas</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6">Status</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-primary/40 py-6 text-right">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredPltRecords.length > 0 ? (
+                      filteredPltRecords.map((record, rIdx) => (
+                        <motion.tr 
+                          key={record.id} 
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: rIdx * 0.05 }}
+                          className="group border-none hover:bg-primary/[0.02] transition-colors"
+                        >
+                          <TableCell className="py-5">
+                            <div className="flex items-center gap-4">
+                              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/5 to-primary/10 flex items-center justify-center text-[#1A4A9A] font-black uppercase text-sm">
+                                {record.namaPegawai.charAt(0)}
+                              </div>
                               <div className="flex flex-col">
-                                <span className="font-semibold text-sm">{record.namaPegawai}</span>
-                                <span className="text-[10px] text-muted-foreground font-mono">{record.nip}</span>
-                                <span className="text-[10px] text-muted-foreground italic">Asli: {record.jabatanAsli}</span>
-                                {record.pegawaiDigantikan && (
-                                  <span className="text-[10px] text-primary italic font-medium">Gantikan: {record.pegawaiDigantikan}</span>
-                                )}
+                                <span className="font-black text-sm text-[#1A4A9A] group-hover:text-primary transition-colors block leading-tight">{record.namaPegawai}</span>
+                                <span className="text-[9px] font-mono text-primary/40 font-bold mt-1">NIP. {record.nip}</span>
+                                <span className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-tighter mt-0.5">{record.jabatanAsli}</span>
                               </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col">
-                                <span className="font-medium text-sm text-primary">{record.jabatanPlt}</span>
-                                <span className="text-[10px] text-muted-foreground font-medium">SK: {record.noSk}</span>
-                                {record.tanggalSurat && (
-                                  <span className="text-[10px] text-muted-foreground font-medium">Tgl Surat: {format(new Date(record.tanggalSurat), 'dd MMM yyyy')}</span>
-                                )}
-                                {record.keterangan && (
-                                  <span className="text-[10px] text-muted-foreground mt-1 bg-muted/50 px-1.5 py-0.5 rounded border border-muted-foreground/10">
-                                    Ket: {record.keterangan}
-                                  </span>
-                                )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-black text-sm text-primary tracking-tight">{record.jabatanPlt}</span>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge className="text-[8px] font-black uppercase tracking-widest bg-primary/5 text-primary border-none px-2 h-4">SK: {record.noSk}</Badge>
                               </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2 text-sm">
-                                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                  <span className="font-medium">Asal:</span> {record.unitKerja}
-                                </div>
-                                <div className="flex items-center gap-2 text-sm">
-                                  <ArrowRight className="h-3.5 w-3.5 text-primary" />
-                                  <span className="font-medium">Tugas:</span> {record.unitKerjaTugas}
-                                </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex items-center gap-2 text-[10px] font-bold">
+                                <Home className="h-3 w-3 text-emerald-500" />
+                                <span className="text-emerald-600 uppercase tracking-tight">{record.unitKerja}</span>
                               </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col text-xs">
-                                <span>{format(new Date(record.tglMulai), 'dd MMM yyyy')}</span>
-                                <span className="text-muted-foreground">
-                                  {record.tglSelesai 
-                                    ? `s.d. ${format(new Date(record.tglSelesai), 'dd MMM yyyy')}` 
-                                    : 's.d. Selesai'}
-                                </span>
+                              <div className="flex items-center gap-2 text-[10px] font-bold">
+                                <ArrowRight className="h-3 w-3 text-primary" />
+                                <span className="text-primary uppercase tracking-tight">{record.unitKerjaTugas}</span>
                               </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge 
-                                variant={record.status === 'Aktif' ? 'default' : 'secondary'}
-                                className={cn(
-                                  "rounded-full px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-                                  record.status === 'Aktif' 
-                                    ? "bg-emerald-100 text-emerald-700" 
-                                    : "bg-muted text-muted-foreground"
-                                )}
-                              >
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1.5">
+                              <Badge className={cn(
+                                "w-fit rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-widest border-none",
+                                record.status === 'Aktif' ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"
+                              )}>
                                 {record.status}
                               </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button 
-                                  size="icon" 
-                                  variant="ghost" 
-                                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => {
-                                    setEditingPltRecord(record);
-                                    setIsEditPltPlhDialogOpen(true);
-                                  }}
-                                >
-                                  <UserCog className="h-4 w-4" />
-                                </Button>
-                                <Button 
-                                  size="icon" 
-                                  variant="ghost" 
-                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => handleDeletePltPlhRecord(record.id, 'PLT')}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
+                              <div className="flex items-center gap-1.5 text-[9px] font-bold text-muted-foreground">
+                                <Calendar className="h-2.5 w-2.5" />
+                                {format(new Date(record.tglMulai), 'dd/MM/yy')}
+                                {record.tglSelesai && ` - ${format(new Date(record.tglSelesai), 'dd/MM/yy')}`}
                               </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">Tidak ada data PLT.</TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-9 w-9 rounded-xl hover:bg-primary/5 text-primary/40 hover:text-primary"
+                                onClick={() => {
+                                  setEditingPltRecord(record);
+                                  setIsEditPltPlhDialogOpen(true);
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-9 w-9 rounded-xl hover:bg-destructive/5 text-destructive/40 hover:text-destructive"
+                                onClick={() => handleDeletePltPlhRecord(record.id, 'PLT')}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </motion.tr>
+                      ))
+                    ) : (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={5} className="h-32 text-center font-black text-[10px] uppercase tracking-[0.2em] text-primary/20">
+                          Tidak ada data penugasan PLT ditemukan.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </motion.div>
 
             {/* PLH Table */}
-            <Card className="border-none shadow-sm overflow-hidden">
-              <CardHeader className="bg-white border-b pb-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              transition={{ delay: 0.7 }}
+              className="bg-white rounded-[2.5rem] shadow-xl shadow-blue-500/5 border border-blue-500/10 overflow-hidden"
+            >
+              <div className="p-8 border-b border-blue-500/5 bg-gradient-to-r from-blue-500/[0.01] to-transparent">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
-                    <CardTitle>Daftar Pelaksana Harian (PLH)</CardTitle>
-                    <CardDescription>Monitoring penugasan Pelaksana Harian di lingkungan BSKJI.</CardDescription>
+                    <h3 className="text-xl font-black text-blue-900 tracking-tight">Monitoring Pelaksana Harian (PLH)</h3>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1">Daftar Penugasan Jabatan Sementara Karena Pejabat Berhalangan</p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                    <div className="relative w-full md:w-64">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative group w-full md:w-64">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-500/40 group-focus-within:text-blue-500 transition-colors" />
                       <Input 
-                        placeholder="Cari PLH..." 
-                        className="pl-9 bg-muted/50 border-none focus-visible:ring-1"
+                        placeholder="Nama atau NIP..." 
+                        className="pl-11 h-12 rounded-2xl bg-blue-500/[0.03] border-none focus-visible:ring-2 focus-visible:ring-blue-500/20 transition-all font-bold text-xs uppercase tracking-widest"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                       />
                     </div>
-                    <Select value={yearFilterPltPlh} onValueChange={setYearFilterPltPlh}>
-                      <SelectTrigger className="w-full md:w-[130px] bg-muted/50 border-none h-10">
-                        <div className="flex items-center gap-2">
-                          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-                          <SelectValue placeholder="Tahun" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Semua Tahun</SelectItem>
-                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(year => (
-                          <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Select value={statusFilterPlh} onValueChange={setStatusFilterPlh}>
-                      <SelectTrigger className="w-full md:w-[130px] bg-muted/50 border-none h-10">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-                          <SelectValue placeholder="Status" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Semua Status</SelectItem>
-                        <SelectItem value="Aktif">Aktif</SelectItem>
-                        <SelectItem value="Selesai">Selesai</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader className="bg-muted/30">
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Pegawai</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Penugasan</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Unit Kerja (Asal/Tugas)</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Periode</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider">Status</TableHead>
-                        <TableHead className="font-bold text-xs uppercase tracking-wider text-right">Aksi</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredPlhRecords.length > 0 ? (
-                        filteredPlhRecords.map((record) => (
-                          <TableRow key={record.id} className="group hover:bg-muted/20 transition-colors">
-                            <TableCell>
+              </div>
+              <div className="p-4 overflow-x-auto custom-scrollbar">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-blue-500/40 py-6">Pegawai / Identitas</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-blue-500/40 py-6">Penugasan PLH</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-blue-500/40 py-6">Jabatan Digantikan</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-blue-500/40 py-6">Periode & Status</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-[0.2em] text-blue-500/40 py-6 text-right">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredPlhRecords.length > 0 ? (
+                      filteredPlhRecords.map((record, rIdx) => (
+                        <motion.tr 
+                          key={record.id} 
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: rIdx * 0.05 }}
+                          className="group border-none hover:bg-blue-500/[0.02] transition-colors"
+                        >
+                          <TableCell className="py-5">
+                            <div className="flex items-center gap-4">
+                              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500/5 to-blue-500/10 flex items-center justify-center text-blue-700 font-black uppercase text-sm">
+                                {record.namaPegawai.charAt(0)}
+                              </div>
                               <div className="flex flex-col">
-                                <span className="font-semibold text-sm">{record.namaPegawai}</span>
-                                <span className="text-[10px] text-muted-foreground font-mono">{record.nip}</span>
-                                <span className="text-[10px] text-muted-foreground italic">Asli: {record.jabatanAsli}</span>
-                                {record.pegawaiDigantikan && (
-                                  <span className="text-[10px] text-blue-600 italic font-medium">Gantikan: {record.pegawaiDigantikan}</span>
-                                )}
+                                <span className="font-black text-sm text-blue-900 group-hover:text-blue-600 transition-colors block leading-tight">{record.namaPegawai}</span>
+                                <span className="text-[9px] font-mono text-blue-500/40 font-bold mt-1">NIP. {record.nip}</span>
                               </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col">
-                                <span className="font-medium text-sm text-blue-600">{record.jabatanPlh}</span>
-                                <span className="text-[10px] text-muted-foreground font-medium">SK: {record.noSk}</span>
-                                {record.tanggalSurat && (
-                                  <span className="text-[10px] text-muted-foreground font-medium">Tgl Surat: {format(new Date(record.tanggalSurat), 'dd MMM yyyy')}</span>
-                                )}
-                                {record.keterangan && (
-                                  <span className="text-[10px] text-muted-foreground mt-1 bg-muted/50 px-1.5 py-0.5 rounded border border-muted-foreground/10">
-                                    Ket: {record.keterangan}
-                                  </span>
-                                )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-black text-sm text-blue-700 tracking-tight">{record.jabatanPlh}</span>
+                              <Badge className="w-fit mt-1 text-[8px] font-black uppercase tracking-widest bg-blue-500/5 text-blue-600 border-none px-2 h-4">SK: {record.noSk}</Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col bg-blue-50/50 p-2.5 rounded-xl border border-blue-100">
+                              <span className="text-[10px] font-black text-blue-900 uppercase leading-tight">{record.pegawaiDigantikan}</span>
+                              <div className="flex items-center gap-1.5 mt-1.5">
+                                <Building2 className="h-2.5 w-2.5 text-blue-400" />
+                                <span className="text-[9px] font-bold text-blue-500/60 uppercase tracking-tighter">{record.unitKerjaTugas}</span>
                               </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2 text-sm">
-                                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                  <span className="font-medium">Asal:</span> {record.unitKerja}
-                                </div>
-                                <div className="flex items-center gap-2 text-sm">
-                                  <ArrowRight className="h-3.5 w-3.5 text-primary" />
-                                  <span className="font-medium">Tugas:</span> {record.unitKerjaTugas}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col text-xs">
-                                <span>{format(new Date(record.tglMulai), 'dd MMM yyyy')}</span>
-                                <span className="text-muted-foreground">s.d. {format(new Date(record.tglSelesai), 'dd MMM yyyy')}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge 
-                                variant={record.status === 'Aktif' ? 'default' : 'secondary'}
-                                className={cn(
-                                  "rounded-full px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-                                  record.status === 'Aktif' 
-                                    ? "bg-blue-100 text-blue-700" 
-                                    : "bg-muted text-muted-foreground"
-                                )}
-                              >
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1.5">
+                              <Badge className={cn(
+                                "w-fit rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-widest border-none",
+                                record.status === 'Aktif' ? "bg-blue-500 text-white shadow-[0_0_8px_rgba(59,130,246,0.3)]" : "bg-muted text-muted-foreground"
+                              )}>
                                 {record.status}
                               </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button 
-                                  size="icon" 
-                                  variant="ghost" 
-                                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => {
-                                    setEditingPlhRecord(record);
-                                    setIsEditPltPlhDialogOpen(true);
-                                  }}
-                                >
-                                  <UserCog className="h-4 w-4" />
-                                </Button>
-                                <Button 
-                                  size="icon" 
-                                  variant="ghost" 
-                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => handleDeletePltPlhRecord(record.id, 'PLH')}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
+                              <div className="flex items-center gap-1.5 text-[9px] font-bold text-muted-foreground">
+                                <Calendar className="h-2.5 w-2.5" />
+                                {format(new Date(record.tglMulai), 'dd/MM/yy')} - {record.tglSelesai ? format(new Date(record.tglSelesai), 'dd/MM/yy') : 'Selesai'}
                               </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">Tidak ada data PLH.</TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0">
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-9 w-9 rounded-xl hover:bg-blue-500/5 text-blue-500/40 hover:text-blue-500"
+                                onClick={() => {
+                                  setEditingPlhRecord(record);
+                                  setIsEditPltPlhDialogOpen(true);
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-9 w-9 rounded-xl hover:bg-destructive/5 text-destructive/40 hover:text-destructive"
+                                onClick={() => handleDeletePltPlhRecord(record.id, 'PLH')}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </motion.tr>
+                      ))
+                    ) : (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={5} className="h-32 text-center font-black text-[10px] uppercase tracking-[0.2em] text-blue-500/20">
+                          Tidak ada data penugasan PLH ditemukan.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </motion.div>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed shadow-sm">
@@ -3374,6 +5147,107 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Unit SK Dialog */}
+      <Dialog open={isEditingUnitSK} onOpenChange={setIsEditingUnitSK}>
+        <DialogContent className="sm:max-w-[425px]">
+          <form onSubmit={handleUpdateUnitSK}>
+            <DialogHeader>
+              <DialogTitle>Update Informasi SK Unit</DialogTitle>
+              <DialogDescription>
+                Informasi SK untuk Unit Kerja: {selectedUnitForTeams}
+              </DialogDescription>
+            </DialogHeader>
+            {(() => {
+              const unitInfo = unitInfoList.find(u => u.unitKerja === selectedUnitForTeams);
+              return (
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="unit-nomorSK">Nomor SK</Label>
+                    <Input id="unit-nomorSK" name="nomorSK" defaultValue={unitInfo?.nomorSK} placeholder="Nomor Surat Keputusan" />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="unit-tanggalSK">Tanggal SK</Label>
+                    <Input id="unit-tanggalSK" name="tanggalSK" type="date" defaultValue={unitInfo?.tanggalSK} />
+                  </div>
+                </div>
+              );
+            })()}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditingUnitSK(false)}>Batal</Button>
+              <Button type="submit">Simpan Info SK</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Org Node Dialog */}
+      <Dialog open={isAddOrgNodeDialogOpen} onOpenChange={setIsAddOrgNodeDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <form onSubmit={handleAddOrgNode}>
+            <DialogHeader>
+              <DialogTitle>Tambah Jabatan Struktural</DialogTitle>
+              <DialogDescription>
+                {parentOrgNodeId 
+                  ? `Tambahkan sub-jabatan di bawah ${orgNodes.find(n => n.id === parentOrgNodeId)?.namaJabatan}`
+                  : 'Tambahkan jabatan tingkat tertinggi (Puncak Struktur)'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="org-namaJabatan">Nama Jabatan</Label>
+                <Input id="org-namaJabatan" name="namaJabatan" placeholder="Contoh: Kepala Balai" required />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="org-namaPegawai">Nama Pejabat</Label>
+                <Input id="org-namaPegawai" name="namaPegawai" placeholder="Nama lengkap pejabat" required />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="org-nip">NIP</Label>
+                <Input id="org-nip" name="nip" placeholder="Nomor Induk Pegawai" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsAddOrgNodeDialogOpen(false)}>Batal</Button>
+              <Button type="submit">Simpan Jabatan</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Org Node Dialog */}
+      <Dialog open={isEditOrgNodeDialogOpen} onOpenChange={setIsEditOrgNodeDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <form onSubmit={handleUpdateOrgNode}>
+            <DialogHeader>
+              <DialogTitle>Edit Jabatan Struktural</DialogTitle>
+              <DialogDescription>
+                Perbarui informasi jabatan struktural formal
+              </DialogDescription>
+            </DialogHeader>
+            {editingOrgNode && (
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-org-namaJabatan">Nama Jabatan</Label>
+                  <Input id="edit-org-namaJabatan" name="namaJabatan" defaultValue={editingOrgNode.namaJabatan} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-org-namaPegawai">Nama Pejabat</Label>
+                  <Input id="edit-org-namaPegawai" name="namaPegawai" defaultValue={editingOrgNode.namaPegawai} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-org-nip">NIP</Label>
+                  <Input id="edit-org-nip" name="nip" defaultValue={editingOrgNode.nip} />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditOrgNodeDialogOpen(false)}>Batal</Button>
+              <Button type="submit">Simpan Perubahan</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
         <DialogContent className="sm:max-w-[400px]">
@@ -3404,7 +5278,7 @@ export default function App() {
       </Dialog>
 
       <footer className="container mx-auto p-8 text-center text-xs text-muted-foreground mb-16 md:mb-0">
-        <p>&copy; {new Date().getFullYear()} Monitoring SKP Pegawai. Sistem Monitoring Berkas Kepegawaian.</p>
+        <p>&copy; {new Date().getFullYear()} Monitoring Berkas SKP Pegawai. Sistem Monitoring Berkas Kepegawaian.</p>
       </footer>
 
       {/* Mobile Navigation */}
@@ -3421,6 +5295,17 @@ export default function App() {
           variant="ghost" 
           className={cn("flex flex-col items-center gap-1 h-auto py-1 px-0 flex-1", activeTab === 'skp' ? "text-primary" : "text-muted-foreground")}
           onClick={() => setActiveTab('skp')}
+        >
+          <FileCheck className="h-5 w-5" />
+          <span className="text-[10px] font-bold">Berkas</span>
+        </Button>
+        <Button 
+          variant="ghost" 
+          className={cn("flex flex-col items-center gap-1 h-auto py-1 px-0 flex-1", activeTab === 'skp-monitoring' ? "text-primary" : "text-muted-foreground")}
+          onClick={() => {
+            setActiveTab('skp-monitoring');
+            setMonitoringSelectedEmployee(null);
+          }}
         >
           <FileText className="h-5 w-5" />
           <span className="text-[10px] font-bold">SKP</span>

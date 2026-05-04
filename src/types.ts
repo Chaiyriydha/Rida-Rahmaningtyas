@@ -17,9 +17,22 @@ export interface SKPRecord {
   unitKerjaPengambil?: string;
   tanggalAmbil?: string;
   keterangan?: string;
+}
+
+export interface SKPMonitoringRecord {
+  id: string;
+  nip: string;
+  namaPegawai: string;
+  jabatan: string;
+  unitKerja: string;
+  tahun: number;
+  periode: SKPPeriode;
   ratingHasilKerja?: string;
   ratingHasilPerilaku?: string;
   predikatKinerja?: string;
+  authorUid: string;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface SKPStats {
@@ -68,6 +81,25 @@ export interface TeamMember {
   nama: string;
   jabatan: string;
   status: string;
+}
+
+export interface OrgNode {
+  id: string;
+  namaJabatan: string;
+  namaPegawai: string;
+  nip: string;
+  parentId: string | null;
+  order: number;
+  authorUid: string;
+  updatedAt?: any;
+}
+
+export interface UnitInfo {
+  id?: string;
+  unitKerja: string;
+  nomorSK: string;
+  tanggalSK: string;
+  updatedAt?: any;
 }
 
 export interface WorkTeam {
