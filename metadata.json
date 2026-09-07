@@ -1,5 +1,6 @@
 {
   "name": "Monitoring Organisasi BSKJI",
-  "description": "Dashboard monitoring Tim Kerja, Berkas SKP Pegawai, Penugasan PLT/PLH, dan Arsip Dokumen BSKJI",
-  "requestFramePermissions": []
+  "description": "Dashboard monitoring Tim Kerja, Berkas SKP Pegawai, Penugasan PLT/PLH, Riwayat Pejabat, dan Arsip Dokumen BSKJI",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

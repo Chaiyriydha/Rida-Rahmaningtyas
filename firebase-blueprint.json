@@ -156,6 +156,26 @@
         "authorUid": { "type": "string" }
       },
       "required": ["unitKerja", "authorUid"]
+    },
+    "OfficialHistoryRecord": {
+      "title": "Official History Record",
+      "description": "Historical leadership records for a Unit Kerja",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "unitKerja": { "type": "string" },
+        "namaPejabat": { "type": "string" },
+        "nip": { "type": "string" },
+        "jabatan": { "type": "string" },
+        "tmtMulai": { "type": "string" },
+        "tmtSelesai": { "type": "string" },
+        "isCurrent": { "type": "boolean" },
+        "keterangan": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["unitKerja", "namaPejabat", "jabatan", "tmtMulai", "isCurrent", "authorUid"]
     }
   },
   "firestore": {
@@ -186,6 +206,10 @@
     "/org_structure/{nodeId}": {
       "schema": "OrgNode",
       "description": "Collection of formal organizational structure nodes"
+    },
+    "/official_history/{historyId}": {
+      "schema": "OfficialHistoryRecord",
+      "description": "Collection of official leadership history per unit kerja"
     }
   }
 }

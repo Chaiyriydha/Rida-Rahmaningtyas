@@ -116,3 +116,18 @@ export interface WorkTeam {
   updatedAt?: any;
   authorUid: string;
 }
+
+export interface OfficialHistoryRecord {
+  id: string;
+  unitKerja: string;
+  namaPejabat: string;
+  nip?: string;
+  jabatan: string;
+  tmtMulai: string;
+  tmtSelesai?: string | null;
+  isCurrent: boolean;
+  keterangan?: string;
+  authorUid: string;
+  createdAt?: any;
+  updatedAt?: any;
+}

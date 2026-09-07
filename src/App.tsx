@@ -37,7 +37,10 @@ import {
   Network,
   Trash2,
   TrendingUp,
-  Clock
+  Clock,
+  ChevronRight,
+  History,
+  Home
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -97,7 +100,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 
-import { SKPRecord, SKPMonitoringRecord, SKPStatus, SKPPeriode, PLTRecord, PLHRecord, PLTStatus, WorkTeam, TeamMember, UnitInfo, OrgNode } from './types';
+import { SKPRecord, SKPMonitoringRecord, SKPStatus, SKPPeriode, PLTRecord, PLHRecord, PLTStatus, WorkTeam, TeamMember, UnitInfo, OrgNode, OfficialHistoryRecord } from './types';
 
 enum OperationType {
   CREATE = 'create',
@@ -250,7 +253,7 @@ function OrgNodeCard({ node, allNodes, onAddSub, onEdit, onDelete }: {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'struktur-organisasi' | 'tim-kerja' | 'skp' | 'skp-monitoring' | 'plt-plh' | 'arsip'>('tim-kerja');
+  const [activeTab, setActiveTab] = useState<'struktur-organisasi' | 'tim-kerja' | 'skp' | 'skp-monitoring' | 'plt-plh' | 'official-history' | 'arsip'>('tim-kerja');
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [records, setRecords] = useState<SKPRecord[]>([]);
@@ -260,6 +263,13 @@ export default function App() {
   const [workTeams, setWorkTeams] = useState<WorkTeam[]>([]);
   const [unitInfoList, setUnitInfoList] = useState<UnitInfo[]>([]);
   const [orgNodes, setOrgNodes] = useState<OrgNode[]>([]);
+  const [officialHistory, setOfficialHistory] = useState<OfficialHistoryRecord[]>([]);
+  const [selectedUnitForHistory, setSelectedUnitForHistory] = useState<string | null>(null);
+  const [isAddHistoryDialogOpen, setIsAddHistoryDialogOpen] = useState(false);
+  const [isEditHistoryDialogOpen, setIsEditHistoryDialogOpen] = useState(false);
+  const [editingHistoryRecord, setEditingHistoryRecord] = useState<OfficialHistoryRecord | null>(null);
+  const [isImportingHistory, setIsImportingHistory] = useState(false);
+  const historyFileInputRef = useRef<HTMLInputElement>(null);
   const [isEditingUnitSK, setIsEditingUnitSK] = useState(false);
   const [isAddOrgNodeDialogOpen, setIsAddOrgNodeDialogOpen] = useState(false);
   const [isEditOrgNodeDialogOpen, setIsEditOrgNodeDialogOpen] = useState(false);
@@ -323,7 +333,7 @@ export default function App() {
   const [editingMemberInfo, setEditingMemberInfo] = useState<{ teamId: string, member: TeamMember, index: number } | null>(null);
   const [pendingSubTeams, setPendingSubTeams] = useState<{ namaTim: string, ketua: TeamMember, anggota: TeamMember[] }[]>([]);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'SKP_MONITORING' | 'PLT' | 'PLH' | 'TIM' } | null>(null);
+  const [deletingInfo, setDeletingInfo] = useState<{ id: string, type: 'SKP' | 'SKP_MONITORING' | 'PLT' | 'PLH' | 'TIM' | 'OFFICIAL_HISTORY' } | null>(null);
   const [monitoringSelectedEmployee, setMonitoringSelectedEmployee] = useState<string | null>(null);
   const [selectedUnitForTeams, setSelectedUnitForTeams] = useState<string | null>(null);
   const [selectedTeamIdForDetails, setSelectedTeamIdForDetails] = useState<string | null>(null);
@@ -343,6 +353,7 @@ export default function App() {
       setRecords([]);
       setPltRecords([]);
       setPlhRecords([]);
+      setOfficialHistory([]);
       return;
     }
 
@@ -423,6 +434,17 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'org_structure');
     });
 
+    const qOfficialHistory = query(collection(db, 'official_history'), orderBy('tmtMulai', 'desc'));
+    const unsubOfficialHistory = onSnapshot(qOfficialHistory, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as OfficialHistoryRecord[];
+      setOfficialHistory(docs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'official_history');
+    });
+
     return () => {
       unsubSkp();
       unsubMonitoring();
@@ -431,6 +453,7 @@ export default function App() {
       unsubWorkTeams();
       unsubUnitInfo();
       unsubOrgStructure();
+      unsubOfficialHistory();
     };
   }, [user]);
 
@@ -608,6 +631,31 @@ export default function App() {
       return matchesSearch && matchesYear && matchesStatus;
     });
   }, [plhRecords, searchQuery, yearFilterPltPlh, statusFilterPlh]);
+
+  const formatTenureDate = (dateStr?: string | null) => {
+    if (!dateStr) return '-';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return format(d, 'dd MMMM yyyy', { locale: id });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const filteredUnitsForHistory = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return UNIT_KERJA_LIST;
+    return UNIT_KERJA_LIST.filter(unit => {
+      if (unit.toLowerCase().includes(q)) return true;
+      const records = officialHistory.filter(h => h.unitKerja === unit);
+      return records.some(r => 
+        r.namaPejabat.toLowerCase().includes(q) || 
+        (r.nip && r.nip.includes(q)) ||
+        r.jabatan.toLowerCase().includes(q)
+      );
+    });
+  }, [searchQuery, officialHistory]);
 
   const chartDataPltPlh = useMemo(() => {
     const years = new Set<number>();
@@ -1208,11 +1256,12 @@ export default function App() {
       type === 'SKP' ? 'skp_records' : 
       type === 'SKP_MONITORING' ? 'skp_monitoring_records' :
       type === 'PLT' ? 'plt_records' : 
-      type === 'PLH' ? 'plh_records' : 'work_teams';
+      type === 'PLH' ? 'plh_records' :
+      type === 'TIM' ? 'work_teams' : 'official_history';
     
     try {
       await deleteDoc(doc(db, collectionName, id));
-      toast.success(`Data ${type === 'SKP' ? '' : type} berhasil dihapus`);
+      toast.success(`Data ${type === 'SKP' ? '' : type === 'OFFICIAL_HISTORY' ? 'Riwayat Pejabat' : type} berhasil dihapus`);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${id}`);
     } finally {
@@ -1777,6 +1826,226 @@ export default function App() {
     toast.success('Data PLT & PLH berhasil diekspor ke Excel');
   };
 
+  const handleAddHistory = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user) {
+      toast.error('Silakan login terlebih dahulu');
+      return;
+    }
+
+    const formData = new FormData(e.currentTarget);
+    const unitKerja = formData.get('unitKerja') as string;
+    const namaPejabat = formData.get('namaPejabat') as string;
+    const nip = (formData.get('nip') as string) || '';
+    const jabatan = formData.get('jabatan') as string;
+    const tmtMulai = formData.get('tmtMulai') as string;
+    const tmtSelesai = (formData.get('tmtSelesai') as string) || null;
+    const isCurrent = formData.get('isCurrent') === 'on';
+    const keterangan = (formData.get('keterangan') as string) || '';
+
+    if (!unitKerja || !namaPejabat || !jabatan || !tmtMulai) {
+      toast.error('Mohon lengkapi data yang wajib diisi');
+      return;
+    }
+
+    try {
+      const newRecord = {
+        unitKerja,
+        namaPejabat,
+        nip,
+        jabatan,
+        tmtMulai,
+        tmtSelesai: isCurrent ? null : tmtSelesai,
+        isCurrent,
+        keterangan,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'official_history'), newRecord);
+      setIsAddHistoryDialogOpen(false);
+      toast.success('Data riwayat pejabat berhasil ditambahkan');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'official_history');
+    }
+  };
+
+  const handleUpdateHistory = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingHistoryRecord || !user) return;
+
+    const formData = new FormData(e.currentTarget);
+    const unitKerja = formData.get('unitKerja') as string;
+    const namaPejabat = formData.get('namaPejabat') as string;
+    const nip = (formData.get('nip') as string) || '';
+    const jabatan = formData.get('jabatan') as string;
+    const tmtMulai = formData.get('tmtMulai') as string;
+    const tmtSelesai = (formData.get('tmtSelesai') as string) || null;
+    const isCurrent = formData.get('isCurrent') === 'on';
+    const keterangan = (formData.get('keterangan') as string) || '';
+
+    try {
+      await updateDoc(doc(db, 'official_history', editingHistoryRecord.id), {
+        unitKerja,
+        namaPejabat,
+        nip,
+        jabatan,
+        tmtMulai,
+        tmtSelesai: isCurrent ? null : tmtSelesai,
+        isCurrent,
+        keterangan,
+        updatedAt: serverTimestamp(),
+      });
+      setIsEditHistoryDialogOpen(false);
+      setEditingHistoryRecord(null);
+      toast.success('Data riwayat pejabat berhasil diperbarui');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `official_history/${editingHistoryRecord.id}`);
+    }
+  };
+
+  const handleDeleteHistory = (id: string) => {
+    setDeletingInfo({ id, type: 'OFFICIAL_HISTORY' });
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const triggerHistoryFileInput = () => {
+    historyFileInputRef.current?.click();
+  };
+
+  const handleImportHistoryExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!user) {
+      toast.error('Silakan login terlebih dahulu');
+      return;
+    }
+
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    if (fileExt !== 'xlsx' && fileExt !== 'xls') {
+      toast.error('Format file harus .xlsx atau .xls');
+      return;
+    }
+
+    setIsImportingHistory(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const dataBuffer = evt.target?.result as ArrayBuffer;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) {
+          toast.error('File Excel kosong');
+          setIsImportingHistory(false);
+          return;
+        }
+
+        let importCount = 0;
+        let skipCount = 0;
+
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i] as any;
+          try {
+            const rawUnit = row['Unit Kerja'] || row['unitKerja'] || row['Unit'] || '';
+            const rawNama = row['Nama Pejabat'] || row['namaPejabat'] || row['Nama'] || row['nama'] || '';
+            const rawNip = row['NIP'] || row['nip'] || '';
+            const rawJabatan = row['Jabatan'] || row['jabatan'] || 'Kepala Balai';
+            const rawTmtMulai = row['TMT Mulai'] || row['tmtMulai'] || row['Mulai'] || '';
+            const rawTmtSelesai = row['TMT Selesai'] || row['tmtSelesai'] || row['Selesai'] || '';
+            const rawStatus = String(row['Status'] || row['status'] || row['isCurrent'] || '').toLowerCase();
+            const isCurrent = rawStatus.includes('aktif') || rawStatus.includes('saat ini') || rawStatus === 'true' || rawStatus === '1';
+            const rawKeterangan = row['Keterangan'] || row['keterangan'] || '';
+
+            if (!rawUnit || !rawNama) {
+              skipCount++;
+              continue;
+            }
+
+            let finalTmtMulai = String(rawTmtMulai).trim();
+            if (!isNaN(Number(finalTmtMulai)) && Number(finalTmtMulai) > 20000) {
+              const dateObj = XLSX.SSF.parse_date_code(Number(finalTmtMulai));
+              finalTmtMulai = `${dateObj.y}-${String(dateObj.m).padStart(2, '0')}-${String(dateObj.d).padStart(2, '0')}`;
+            }
+
+            let finalTmtSelesai = String(rawTmtSelesai).trim();
+            if (finalTmtSelesai && !isNaN(Number(finalTmtSelesai)) && Number(finalTmtSelesai) > 20000) {
+              const dateObj = XLSX.SSF.parse_date_code(Number(finalTmtSelesai));
+              finalTmtSelesai = `${dateObj.y}-${String(dateObj.m).padStart(2, '0')}-${String(dateObj.d).padStart(2, '0')}`;
+            }
+
+            const newRecord = {
+              unitKerja: String(rawUnit).trim(),
+              namaPejabat: String(rawNama).trim(),
+              nip: String(rawNip).trim(),
+              jabatan: String(rawJabatan).trim(),
+              tmtMulai: finalTmtMulai || new Date().toISOString().slice(0, 10),
+              tmtSelesai: isCurrent ? null : (finalTmtSelesai || null),
+              isCurrent: Boolean(isCurrent),
+              keterangan: String(rawKeterangan).trim(),
+              authorUid: user.uid,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+
+            await addDoc(collection(db, 'official_history'), newRecord);
+            importCount++;
+          } catch (rowErr) {
+            console.error('Error importing history row:', rowErr);
+            skipCount++;
+          }
+        }
+
+        toast.success(`Berhasil mengimpor ${importCount} riwayat pejabat.${skipCount > 0 ? ` (${skipCount} baris dilewati)` : ''}`);
+      } catch (error) {
+        console.error('Import error:', error);
+        toast.error('Gagal membaca file Excel');
+      } finally {
+        setIsImportingHistory(false);
+        if (historyFileInputRef.current) historyFileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleExportHistory = () => {
+    if (officialHistory.length === 0) {
+      toast.error('Tidak ada data riwayat pejabat untuk diekspor');
+      return;
+    }
+
+    const exportData = officialHistory.map(record => ({
+      'Unit Kerja': record.unitKerja,
+      'Nama Pejabat': record.namaPejabat,
+      'NIP': record.nip || '-',
+      'Jabatan': record.jabatan,
+      'TMT Mulai': record.tmtMulai,
+      'TMT Selesai': record.tmtSelesai || (record.isCurrent ? 'Sekarang' : '-'),
+      'Status': record.isCurrent ? 'Aktif (Saat Ini)' : 'Riwayat Sebelumnya',
+      'Keterangan': record.keterangan || '-',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Riwayat Pejabat');
+
+    const maxWidths = Object.keys(exportData[0]).map(key => {
+      const headerLen = key.length;
+      const maxDataLen = Math.max(...exportData.map(row => String(row[key as keyof typeof row]).length));
+      return { wch: Math.max(headerLen, maxDataLen) + 3 };
+    });
+    worksheet['!cols'] = maxWidths;
+
+    XLSX.writeFile(workbook, `Riwayat_Pejabat_BSKJI_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
+    toast.success('Data Riwayat Pejabat berhasil diekspor ke Excel');
+  };
+
   const renderTeamCard = (team: WorkTeam, isSubTeam = false) => (
     <Card key={team.id} className="overflow-hidden border-none shadow-sm hover:shadow-md transition-all group cursor-pointer" onClick={() => setSelectedTeamIdForDetails(team.id)}>
       <CardHeader className={`${isSubTeam ? 'bg-primary/10' : 'bg-primary/5'} pb-4`}>
@@ -1895,6 +2164,17 @@ export default function App() {
               PLT & PLH
             </Button>
             <Button 
+              variant={activeTab === 'official-history' ? 'default' : 'ghost'} 
+              className={cn(
+                "justify-start gap-3 h-10 px-4 transition-all", 
+                activeTab === 'official-history' ? "shadow-sm" : "text-muted-foreground"
+              )}
+              onClick={() => setActiveTab('official-history')}
+            >
+              <Clock className="h-4 w-4" />
+              Riwayat Pejabat
+            </Button>
+            <Button 
               variant={activeTab === 'arsip' ? 'default' : 'ghost'} 
               className={cn(
                 "justify-start gap-3 h-10 px-4 transition-all", 
@@ -1949,7 +2229,7 @@ export default function App() {
 
             <div className="hidden md:block">
               <h2 className="text-sm font-semibold text-muted-foreground">
-                {activeTab === 'struktur-organisasi' ? 'Struktur Organisasi' : activeTab === 'tim-kerja' ? 'Monitoring Tim Kerja' : activeTab === 'skp' ? 'Monitoring Berkas SKP Pegawai' : activeTab === 'skp-monitoring' ? 'Monitoring SKP Pegawai (Rating)' : activeTab === 'plt-plh' ? 'Monitoring PLT & PLH' : 'Arsip Dokumen'}
+                {activeTab === 'struktur-organisasi' ? 'Struktur Organisasi' : activeTab === 'tim-kerja' ? 'Monitoring Tim Kerja' : activeTab === 'skp' ? 'Monitoring Berkas SKP Pegawai' : activeTab === 'skp-monitoring' ? 'Monitoring SKP Pegawai (Rating)' : activeTab === 'plt-plh' ? 'Monitoring PLT & PLH' : activeTab === 'official-history' ? 'Riwayat Pejabat' : 'Arsip Dokumen'}
               </h2>
             </div>
 
@@ -2847,6 +3127,139 @@ export default function App() {
                           />
                           <Button type="submit" className="bg-primary hover:bg-primary/90">
                             Simpan Data Penugasan
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    )}
+                  </DialogContent>
+                </Dialog>
+              </>
+            )}
+
+            {user && activeTab === 'official-history' && (
+              <>
+                <input
+                  type="file"
+                  ref={historyFileInputRef}
+                  onChange={handleImportHistoryExcel}
+                  accept=".xlsx, .xls"
+                  className="hidden"
+                />
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="hidden sm:flex gap-2 h-9"
+                  onClick={triggerHistoryFileInput}
+                  disabled={isImportingHistory}
+                >
+                  {isImportingHistory ? (
+                    <span className="flex items-center gap-2">
+                      <span className="h-3 w-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      Importing...
+                    </span>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4" />
+                      Import Excel
+                    </>
+                  )}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="hidden sm:flex gap-2 h-9"
+                  onClick={handleExportHistory}
+                >
+                  <Download className="h-4 w-4" />
+                  Export Excel
+                </Button>
+                <Dialog open={isAddHistoryDialogOpen} onOpenChange={setIsAddHistoryDialogOpen}>
+                  <DialogTrigger 
+                    nativeButton={true}
+                    render={<Button size="sm" className="gap-2 h-9 shadow-sm" />}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Tambah Riwayat
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+                    {isAddHistoryDialogOpen && (
+                      <form onSubmit={handleAddHistory}>
+                        <DialogHeader>
+                          <DialogTitle>Tambah Data Riwayat Pejabat</DialogTitle>
+                          <DialogDescription>
+                            Masukkan informasi kepala unit kerja atau riwayat pejabat yang pernah menjabat.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+                          <div className="grid gap-2">
+                            <Label htmlFor="hist-unitKerja">Unit Kerja</Label>
+                            <Select name="unitKerja" defaultValue={selectedUnitForHistory || undefined} required>
+                              <SelectTrigger id="hist-unitKerja">
+                                <SelectValue placeholder="Pilih Unit Kerja" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {UNIT_KERJA_LIST.map(unit => (
+                                  <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label htmlFor="hist-namaPejabat">Nama Pejabat</Label>
+                              <Input id="hist-namaPejabat" name="namaPejabat" placeholder="Nama lengkap & gelar" required />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="hist-nip">NIP (Opsional)</Label>
+                              <Input id="hist-nip" name="nip" placeholder="NIP pejabat" />
+                            </div>
+                          </div>
+
+                          <div className="grid gap-2">
+                            <Label htmlFor="hist-jabatan">Jabatan</Label>
+                            <Input id="hist-jabatan" name="jabatan" defaultValue="Kepala Balai" placeholder="Contoh: Kepala Balai / Plt. Kepala Balai" required />
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label htmlFor="hist-tmtMulai">TMT Mulai Menjabat</Label>
+                              <Input id="hist-tmtMulai" name="tmtMulai" type="date" required />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="hist-tmtSelesai">TMT Selesai Menjabat</Label>
+                              <Input id="hist-tmtSelesai" name="tmtSelesai" type="date" />
+                              <span className="text-[10px] text-muted-foreground">Kosongkan jika saat ini masih aktif menjabat</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-2 rounded-xl border p-3 bg-muted/20">
+                            <Checkbox id="hist-isCurrent" name="isCurrent" defaultChecked={true} />
+                            <div className="grid gap-1 leading-none">
+                              <label
+                                htmlFor="hist-isCurrent"
+                                className="text-xs font-bold leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                              >
+                                Pejabat Saat Ini (Sedang Menjabat / Aktif)
+                              </label>
+                              <p className="text-[10px] text-muted-foreground">
+                                Centang jika pejabat ini adalah kepala unit kerja yang aktif saat ini.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-2">
+                            <Label htmlFor="hist-keterangan">Keterangan (Opsional)</Label>
+                            <Input id="hist-keterangan" name="keterangan" placeholder="Contoh: SK Pelantikan No. ..., mutasi, dsb." />
+                          </div>
+                        </div>
+                        <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
+                          <DialogClose 
+                            nativeButton={true}
+                            render={<Button type="button" variant="outline">Batal</Button>} 
+                          />
+                          <Button type="submit" className="bg-primary hover:bg-primary/90">
+                            Simpan Data Riwayat
                           </Button>
                         </DialogFooter>
                       </form>
@@ -4458,6 +4871,197 @@ export default function App() {
               </div>
             </motion.div>
           </div>
+        ) : activeTab === 'official-history' ? (
+          <div className="space-y-6">
+            {/* Header with Title and buttons placed beside as requested */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-primary/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+            >
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Clock className="h-6 w-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h2 className="text-2xl md:text-3xl font-black text-[#1A4A9A] tracking-tight">Riwayat Pejabat</h2>
+                    <Badge variant="outline" className="text-xs font-semibold px-2.5 py-0.5 border-primary/20 text-primary bg-primary/5">
+                      {UNIT_KERJA_LIST.length} Unit Kerja
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Daftar unit kerja, kepala unit kerja yang sedang aktif, dan riwayat pejabat sebelumnya.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action buttons placed directly beside Riwayat Pejabat */}
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                <input
+                  type="file"
+                  ref={historyFileInputRef}
+                  onChange={handleImportHistoryExcel}
+                  accept=".xlsx, .xls"
+                  className="hidden"
+                />
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-2 h-9 px-3.5 rounded-lg text-xs font-semibold"
+                  onClick={triggerHistoryFileInput}
+                  disabled={isImportingHistory}
+                >
+                  {isImportingHistory ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-3 w-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      Importing...
+                    </span>
+                  ) : (
+                    <>
+                      <Upload className="h-3.5 w-3.5 text-primary" />
+                      Import Excel
+                    </>
+                  )}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-2 h-9 px-3.5 rounded-lg text-xs font-semibold"
+                  onClick={handleExportHistory}
+                >
+                  <Download className="h-3.5 w-3.5 text-primary" />
+                  Export Excel
+                </Button>
+                <Button 
+                  size="sm" 
+                  className="gap-2 h-9 px-4 rounded-lg text-xs font-semibold shadow-sm"
+                  onClick={() => {
+                    setEditingHistoryRecord(null);
+                    setIsAddHistoryDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Tambah Riwayat
+                </Button>
+              </div>
+            </motion.div>
+
+            {/* Search Filter */}
+            <div className="bg-white p-3.5 rounded-xl border shadow-sm flex items-center gap-3">
+              <Search className="h-4 w-4 text-muted-foreground ml-2 shrink-0" />
+              <Input 
+                placeholder="Cari unit kerja, nama kepala aktif, atau NIP..."
+                className="border-none shadow-none focus-visible:ring-0 text-xs font-medium h-8"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setSearchQuery('')}
+                  className="h-7 px-2 text-xs text-muted-foreground"
+                >
+                  Reset
+                </Button>
+              )}
+            </div>
+
+            {/* Vertical List of Unit Kerja (Ngelis ke bawah, bukan kotak-kotak) */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-2xl border shadow-sm overflow-hidden"
+            >
+              <div className="divide-y divide-gray-100">
+                {filteredUnitsForHistory.map((unit, index) => {
+                  const records = officialHistory.filter(h => h.unitKerja === unit);
+                  const activeOfficial = records.find(h => h.isCurrent);
+                  const totalRecorded = records.length;
+
+                  return (
+                    <div 
+                      key={unit}
+                      onClick={() => setSelectedUnitForHistory(unit)}
+                      className="p-4 md:p-5 hover:bg-blue-50/40 transition-colors cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-3 group"
+                    >
+                      <div className="flex items-start md:items-center gap-3.5 min-w-0 flex-1">
+                        <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0 group-hover:bg-primary group-hover:text-white transition-colors">
+                          {String(index + 1).padStart(2, '0')}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-bold text-sm md:text-base text-[#1A4A9A] group-hover:text-primary transition-colors leading-tight">
+                              {unit}
+                            </h3>
+                          </div>
+
+                          {/* Active official information */}
+                          <div className="mt-1.5 flex flex-wrap items-center gap-y-1 gap-x-2.5 text-xs">
+                            {activeOfficial ? (
+                              <>
+                                <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 px-2 py-0 text-[10px] font-bold">
+                                  Kepala Aktif
+                                </Badge>
+                                <span className="font-bold text-foreground flex items-center gap-1">
+                                  <User className="h-3 w-3 text-primary" />
+                                  {activeOfficial.namaPejabat}
+                                </span>
+                                {activeOfficial.nip && (
+                                  <span className="text-muted-foreground font-mono text-[11px]">
+                                    (NIP. {activeOfficial.nip})
+                                  </span>
+                                )}
+                                <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
+                                  <Calendar className="h-3 w-3" />
+                                  {formatTenureDate(activeOfficial.tmtMulai)} s.d. Sekarang
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground/60 italic text-xs flex items-center gap-1">
+                                <User className="h-3 w-3 opacity-40" />
+                                Belum ada kepala unit kerja aktif yang dicatat
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 shrink-0 self-end md:self-center">
+                        <Badge variant="outline" className="text-[10px] font-semibold px-2.5 py-0.5 bg-muted/20 border-muted-foreground/20">
+                          {totalRecorded > 0 ? `${totalRecorded} Pejabat` : '0 Pejabat'}
+                        </Badge>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="gap-1 text-xs font-bold text-primary group-hover:bg-primary group-hover:text-white rounded-lg h-8 px-3 transition-all"
+                        >
+                          <span>Riwayat</span>
+                          <ChevronRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {filteredUnitsForHistory.length === 0 && (
+                  <div className="text-center py-12 px-4">
+                    <Search className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+                    <p className="font-bold text-xs text-muted-foreground">Tidak ada unit kerja yang sesuai dengan kata kunci pencarian.</p>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="mt-2 text-xs h-8" 
+                      onClick={() => setSearchQuery('')}
+                    >
+                      Reset Pencarian
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed shadow-sm">
             <div className="h-20 w-20 rounded-full bg-primary/5 flex items-center justify-center mb-6">
@@ -5248,6 +5852,320 @@ export default function App() {
         </DialogContent>
       </Dialog>
       
+      {/* Detail Riwayat Pejabat per Unit Kerja Dialog */}
+      <Dialog 
+        open={!!selectedUnitForHistory} 
+        onOpenChange={(open) => {
+          if (!open) setSelectedUnitForHistory(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          {selectedUnitForHistory && (() => {
+            const records = officialHistory.filter(h => h.unitKerja === selectedUnitForHistory);
+            const activeOfficial = records.find(h => h.isCurrent);
+            const previousOfficials = records
+              .filter(h => !h.isCurrent)
+              .sort((a, b) => new Date(b.tmtMulai).getTime() - new Date(a.tmtMulai).getTime());
+
+            return (
+              <div className="space-y-6">
+                <DialogHeader>
+                  <div className="flex items-center gap-2 text-primary text-xs font-bold uppercase tracking-wider">
+                    <Building2 className="h-4 w-4" />
+                    Unit Kerja
+                  </div>
+                  <DialogTitle className="text-xl font-black text-[#1A4A9A] leading-tight">
+                    {selectedUnitForHistory}
+                  </DialogTitle>
+                  <DialogDescription className="text-xs">
+                    Riwayat pejabat dan masa kepemimpinan unit kerja.
+                  </DialogDescription>
+                </DialogHeader>
+
+                {/* Pejabat Aktif Saat Ini */}
+                <div className="rounded-2xl border bg-gradient-to-br from-blue-50/80 via-white to-blue-50/30 p-5 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-xs font-black uppercase tracking-wider text-emerald-700">
+                        Kepala Unit Kerja Saat Ini (Aktif)
+                      </span>
+                    </div>
+                    {user && activeOfficial && (
+                      <div className="flex items-center gap-1">
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-8 w-8 rounded-lg hover:bg-primary/10 text-primary"
+                          onClick={() => {
+                            setEditingHistoryRecord(activeOfficial);
+                            setIsEditHistoryDialogOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-8 w-8 rounded-lg hover:bg-destructive/10 text-destructive"
+                          onClick={() => handleDeleteHistory(activeOfficial.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {activeOfficial ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-2xl bg-primary text-white font-bold flex items-center justify-center text-base shrink-0 shadow-sm">
+                          {activeOfficial.namaPejabat.charAt(0)}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-base text-[#1A4A9A] leading-tight">
+                            {activeOfficial.namaPejabat}
+                          </h4>
+                          <p className="text-xs text-muted-foreground font-mono">
+                            {activeOfficial.nip ? `NIP. ${activeOfficial.nip}` : 'NIP tidak tercatat'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs border-t border-blue-100">
+                        <div>
+                          <span className="text-muted-foreground block text-[10px] uppercase font-bold">Jabatan:</span>
+                          <span className="font-semibold text-foreground">{activeOfficial.jabatan}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block text-[10px] uppercase font-bold">Periode Menjabat:</span>
+                          <span className="font-semibold text-foreground">
+                            {formatTenureDate(activeOfficial.tmtMulai)} s.d. Sekarang
+                          </span>
+                        </div>
+                      </div>
+
+                      {activeOfficial.keterangan && (
+                        <p className="text-[11px] text-muted-foreground italic pt-1">
+                          Catatan: {activeOfficial.keterangan}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4">
+                      <p className="text-xs text-muted-foreground">Belum ada kepala unit kerja aktif yang dicatat.</p>
+                      {user && (
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="mt-2 text-xs gap-1.5 h-8 font-bold"
+                          onClick={() => {
+                            setEditingHistoryRecord(null);
+                            setIsAddHistoryDialogOpen(true);
+                          }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Set Kepala Aktif
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Riwayat Pejabat Sebelumnya */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-[#1A4A9A] uppercase tracking-wider flex items-center gap-2">
+                      <History className="h-4 w-4 text-primary" />
+                      Riwayat Kepala Unit Kerja Sebelumnya ({previousOfficials.length})
+                    </h4>
+                  </div>
+
+                  {previousOfficials.length > 0 ? (
+                    <div className="divide-y divide-gray-100 rounded-2xl border bg-white overflow-hidden shadow-sm">
+                      {previousOfficials.map((item, idx) => (
+                        <div key={item.id} className="p-4 hover:bg-muted/30 transition-colors flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3 min-w-0 flex-1">
+                            <div className="h-8 w-8 rounded-xl bg-muted flex items-center justify-center font-bold text-xs text-muted-foreground shrink-0 mt-0.5">
+                              {idx + 1}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-sm text-[#1A4A9A]">{item.namaPejabat}</span>
+                                <Badge variant="outline" className="text-[10px] font-medium h-4 px-1.5">
+                                  {item.jabatan}
+                                </Badge>
+                              </div>
+                              {item.nip && (
+                                <p className="text-[11px] text-muted-foreground font-mono">NIP. {item.nip}</p>
+                              )}
+                              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+                                <Calendar className="h-3 w-3 text-primary/60" />
+                                <span>Periode: {formatTenureDate(item.tmtMulai)} s.d. {formatTenureDate(item.tmtSelesai)}</span>
+                              </p>
+                              {item.keterangan && (
+                                <p className="text-[11px] text-muted-foreground/80 italic mt-0.5">
+                                  {item.keterangan}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {user && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-7 w-7 rounded-lg hover:bg-primary/10 text-primary"
+                                onClick={() => {
+                                  setEditingHistoryRecord(item);
+                                  setIsEditHistoryDialogOpen(true);
+                                }}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-7 w-7 rounded-lg hover:bg-destructive/10 text-destructive"
+                                onClick={() => handleDeleteHistory(item.id)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 rounded-2xl border border-dashed bg-muted/10 p-6">
+                      <History className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+                      <p className="text-xs font-semibold text-muted-foreground">
+                        Belum ada data riwayat pejabat sebelumnya yang dicatat untuk unit ini.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter className="flex flex-row items-center justify-between sm:justify-between pt-3 border-t">
+                  {user ? (
+                    <Button 
+                      size="sm" 
+                      className="gap-1.5 text-xs font-bold"
+                      onClick={() => {
+                        setEditingHistoryRecord(null);
+                        setIsAddHistoryDialogOpen(true);
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Tambah Riwayat Untuk Unit Ini
+                    </Button>
+                  ) : <div />}
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setSelectedUnitForHistory(null)}
+                  >
+                    Tutup
+                  </Button>
+                </DialogFooter>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Riwayat Pejabat Dialog */}
+      <Dialog open={isEditHistoryDialogOpen} onOpenChange={(open) => {
+        setIsEditHistoryDialogOpen(open);
+        if (!open) setEditingHistoryRecord(null);
+      }}>
+        <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+          {isEditHistoryDialogOpen && editingHistoryRecord && (
+            <form onSubmit={handleUpdateHistory}>
+              <DialogHeader>
+                <DialogTitle>Edit Riwayat Pejabat</DialogTitle>
+                <DialogDescription>
+                  Perbarui informasi riwayat pejabat unit kerja.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-hist-unitKerja">Unit Kerja</Label>
+                  <Select name="unitKerja" defaultValue={editingHistoryRecord.unitKerja} required>
+                    <SelectTrigger id="edit-hist-unitKerja">
+                      <SelectValue placeholder="Pilih Unit Kerja" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UNIT_KERJA_LIST.map(unit => (
+                        <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-hist-namaPejabat">Nama Pejabat</Label>
+                    <Input id="edit-hist-namaPejabat" name="namaPejabat" defaultValue={editingHistoryRecord.namaPejabat} required />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-hist-nip">NIP (Opsional)</Label>
+                    <Input id="edit-hist-nip" name="nip" defaultValue={editingHistoryRecord.nip || ''} />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-hist-jabatan">Jabatan</Label>
+                  <Input id="edit-hist-jabatan" name="jabatan" defaultValue={editingHistoryRecord.jabatan} required />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-hist-tmtMulai">TMT Mulai Menjabat</Label>
+                    <Input id="edit-hist-tmtMulai" name="tmtMulai" type="date" defaultValue={editingHistoryRecord.tmtMulai} required />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-hist-tmtSelesai">TMT Selesai Menjabat</Label>
+                    <Input id="edit-hist-tmtSelesai" name="tmtSelesai" type="date" defaultValue={editingHistoryRecord.tmtSelesai || ''} />
+                    <span className="text-[10px] text-muted-foreground">Kosongkan jika saat ini masih aktif menjabat</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 rounded-xl border p-3 bg-muted/20">
+                  <Checkbox id="edit-hist-isCurrent" name="isCurrent" defaultChecked={editingHistoryRecord.isCurrent} />
+                  <div className="grid gap-1 leading-none">
+                    <label
+                      htmlFor="edit-hist-isCurrent"
+                      className="text-xs font-bold leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                    >
+                      Pejabat Saat Ini (Sedang Menjabat / Aktif)
+                    </label>
+                    <p className="text-[10px] text-muted-foreground">
+                      Centang jika pejabat ini adalah kepala unit kerja yang aktif saat ini.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-hist-keterangan">Keterangan (Opsional)</Label>
+                  <Input id="edit-hist-keterangan" name="keterangan" defaultValue={editingHistoryRecord.keterangan || ''} />
+                </div>
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0 sticky bottom-0 bg-background pt-2 border-t mt-2">
+                <DialogClose 
+                  nativeButton={true}
+                  render={<Button type="button" variant="outline">Batal</Button>} 
+                />
+                <Button type="submit" className="bg-primary hover:bg-primary/90">
+                  Simpan Perubahan
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
         <DialogContent className="sm:max-w-[400px]">
@@ -5259,7 +6177,7 @@ export default function App() {
               <DialogTitle>Konfirmasi Hapus</DialogTitle>
             </div>
             <DialogDescription>
-              Apakah Anda yakin ingin menghapus data {deletingInfo?.type === 'SKP' ? 'SKP' : (deletingInfo?.type === 'TIM' ? 'Tim Kerja' : deletingInfo?.type)} ini? Tindakan ini tidak dapat dibatalkan.
+              Apakah Anda yakin ingin menghapus data {deletingInfo?.type === 'SKP' ? 'SKP' : (deletingInfo?.type === 'TIM' ? 'Tim Kerja' : deletingInfo?.type === 'OFFICIAL_HISTORY' ? 'Riwayat Pejabat' : deletingInfo?.type)} ini? Tindakan ini tidak dapat dibatalkan.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="mt-4 gap-2 sm:gap-0">
@@ -5317,6 +6235,14 @@ export default function App() {
         >
           <LayoutDashboard className="h-5 w-5" />
           <span className="text-[10px] font-bold">PLT/PLH</span>
+        </Button>
+        <Button 
+          variant="ghost" 
+          className={cn("flex flex-col items-center gap-1 h-auto py-1 px-0 flex-1", activeTab === 'official-history' ? "text-primary" : "text-muted-foreground")}
+          onClick={() => setActiveTab('official-history')}
+        >
+          <Clock className="h-5 w-5" />
+          <span className="text-[10px] font-bold">Riwayat</span>
         </Button>
         <Button 
           variant="ghost" 

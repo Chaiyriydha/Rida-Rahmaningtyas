@@ -92,6 +92,15 @@ service cloud.firestore {
              (!("tanggalSK" in data) || data.tanggalSK is string);
     }
 
+    function isValidOfficialHistory(data) {
+      return data.unitKerja is string && data.unitKerja.size() > 0 &&
+             data.namaPejabat is string && data.namaPejabat.size() > 0 &&
+             data.jabatan is string && data.jabatan.size() > 0 &&
+             data.tmtMulai is string && data.tmtMulai.size() > 0 &&
+             data.isCurrent is bool &&
+             data.authorUid is string && data.authorUid.size() > 0;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -142,6 +151,13 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && (isAdmin() || (isValidUnitInfo(request.resource.data) && request.resource.data.authorUid == request.auth.uid));
       allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.authorUid) && isValidUnitInfo(request.resource.data)));
+      allow delete: if isAuthenticated() && (isAdmin() || isOwner(resource.data.authorUid));
+    }
+
+    match /official_history/{historyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isAdmin() || (isValidOfficialHistory(request.resource.data) && request.resource.data.authorUid == request.auth.uid));
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(resource.data.authorUid) && isValidOfficialHistory(request.resource.data)));
       allow delete: if isAuthenticated() && (isAdmin() || isOwner(resource.data.authorUid));
     }
 
